@@ -1,0 +1,42 @@
+# PostgreSQL Helm Chart Values
+# Replaces 185 lines of custom YAML with this configuration
+
+# Authentication
+auth:
+  enablePostgresUser: true
+  # postgresPassword: Set via --set flag during deployment for security
+  username: "postgres"
+  database: "shared_db"
+
+# Persistence - using local storage like current setup
+primary:
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: "local-storage"
+    
+  # Node affinity to match current setup
+  nodeSelector:
+    kubernetes.io/hostname: sanzad-ubuntu-21
+    
+  # Resource limits to match current setup
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    postgresql: 5432
+
+# External access via NodePort (matches current setup)
+# We'll create a separate NodePort service for external access
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true 

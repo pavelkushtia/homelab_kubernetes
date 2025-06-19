@@ -1,0 +1,84 @@
+# Prometheus Monitoring Stack Helm Chart Values
+# Replaces 378 lines of custom YAML with this configuration
+
+# Prometheus configuration
+prometheus:
+  prometheusSpec:
+    # Node affinity to match current setup
+    nodeSelector:
+      kubernetes.io/hostname: sanzad-ubuntu-21
+      
+    # Resource limits to match current setup
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+        
+    # Storage configuration
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+              
+    # Retention policy to match current setup
+    retention: 15d
+    
+  # External access service
+  service:
+    type: NodePort
+    nodePort: 30090
+
+# Grafana configuration
+grafana:
+  # Node affinity
+  nodeSelector:
+    kubernetes.io/hostname: sanzad-ubuntu-21
+    
+  # Disable sign up to match current setup
+  grafana.ini:
+    server:
+      root_url: "http://sanzad-ubuntu-21:30300"
+    
+    auth.anonymous:
+      enabled: false
+    
+    security:
+      admin_user: "admin"
+      
+  # Resource limits to match current setup
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+      
+  # Persistence configuration
+  persistence:
+    enabled: true
+    storageClassName: local-storage
+    size: 2Gi
+    
+  # Service configuration
+  service:
+    type: NodePort
+    nodePort: 30300
+
+# Disable AlertManager for simplicity
+alertmanager:
+  enabled: false
+
+# Keep default node-exporter and kube-state-metrics
+nodeExporter:
+  enabled: true
+  
+kubeStateMetrics:
+  enabled: true 

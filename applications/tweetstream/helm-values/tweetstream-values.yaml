@@ -1,0 +1,112 @@
+# TweetStream Application Helm Values
+# Modern deployment configuration using platform services
+
+# Backend Configuration
+backend:
+  image:
+    repository: sanzad-ubuntu-21:30500/tweetstream-backend
+    tag: "latest"
+    pullPolicy: Always
+  
+  replicas: 2
+  
+  service:
+    type: ClusterIP
+    port: 5000
+  
+  env:
+    - name: NODE_ENV
+      value: "production"
+    - name: PORT
+      value: "5000"
+    - name: DB_HOST
+      value: "postgresql.platform-services.svc.cluster.local"
+    - name: DB_PORT
+      value: "5432"
+    - name: DB_NAME
+      value: "tweetstream"
+    - name: DB_USER
+      value: "postgres"
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: postgres-credentials
+          key: password
+    - name: REDIS_HOST
+      value: "redis-master.platform-services.svc.cluster.local"
+    - name: REDIS_PORT
+      value: "6379"
+    - name: KAFKA_BROKER
+      value: "kafka.platform-services.svc.cluster.local:9092"
+    - name: JWT_SECRET
+      value: "tweetstream-jwt-secret-2024"
+    - name: FRONTEND_URL
+      value: "http://tweetstream.local"
+
+# Frontend Configuration
+frontend:
+  image:
+    repository: sanzad-ubuntu-21:30500/tweetstream-frontend
+    tag: "latest"
+    pullPolicy: Always
+  
+  replicas: 2
+  
+  service:
+    type: ClusterIP
+    port: 80
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: tweetstream.local
+      paths:
+        - path: /api
+          pathType: Prefix
+          service:
+            name: tweetstream-backend
+            port: 5000
+        - path: /
+          pathType: Prefix
+          service:
+            name: tweetstream-frontend
+            port: 80
+
+# NodePort Services (Fallback)
+nodePort:
+  backend:
+    enabled: true
+    port: 30950
+  frontend:
+    enabled: true
+    port: 30951
+
+# Resource Limits
+resources:
+  backend:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  frontend:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Health Checks
+healthCheck:
+  backend:
+    path: /health
+    port: 5000
+  frontend:
+    path: /
+    port: 80 

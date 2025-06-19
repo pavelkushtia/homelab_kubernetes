@@ -1,0 +1,42 @@
+# Redis Helm Chart Values
+# Replaces 105 lines of custom YAML with this configuration
+
+# Architecture
+architecture: standalone  # Single instance like current setup
+auth:
+  enabled: false  # No password required like current setup
+
+# Master configuration (for standalone)
+master:
+  persistence:
+    enabled: false  # Using emptyDir like current setup
+    
+  # Node affinity to match current setup
+  nodeSelector:
+    kubernetes.io/hostname: sanzad-ubuntu-21
+    
+  # Resource limits to match current setup  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  # Redis configuration matching current setup
+  configuration: |-
+    appendonly yes
+    save 60 1
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    redis: 6379
+
+# Disable metrics for simplicity
+metrics:
+  enabled: false 

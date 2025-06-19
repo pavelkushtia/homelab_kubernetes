@@ -1,0 +1,6 @@
+dependencies:
+- name: microservice
+  repository: http://sanzad-ubuntu-21:30800
+  version: 1.0.0
+digest: sha256:51514f77c81746c701751c007c941e60c6e8ef9806db029ce93b32b0c0893104
+generated: "2025-05-31T17:00:50.976890677-07:00"

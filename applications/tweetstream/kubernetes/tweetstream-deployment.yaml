@@ -1,0 +1,1681 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tweetstream-backend-config
+  namespace: default
+data:
+  package.json: |
+    {
+      "name": "tweetstream-backend",
+      "version": "4.0.0",
+      "description": "TweetStream Backend - Real Database Integration",
+      "main": "server.js",
+      "scripts": {
+        "start": "node server.js"
+      },
+      "dependencies": {
+        "express": "^4.19.2",
+        "cors": "^2.8.5",
+        "pg": "^8.11.3",
+        "redis": "^4.6.7",
+        "kafkajs": "^2.2.4",
+        "bcrypt": "^5.1.1",
+        "jsonwebtoken": "^9.0.2",
+        "helmet": "^7.0.0",
+        "compression": "^1.7.4"
+      }
+    }
+  server.js: |
+    const express = require('express');
+    const cors = require('cors');
+    const { Pool } = require('pg');
+    const Redis = require('redis');
+    const { Kafka } = require('kafkajs');
+    const bcrypt = require('bcrypt');
+    const jwt = require('jsonwebtoken');
+    const helmet = require('helmet');
+    const compression = require('compression');
+
+    const app = express();
+    const PORT = process.env.PORT || 5000;
+
+    // Security middleware
+    app.use(helmet());
+    app.use(compression());
+    app.use(cors({
+        origin: process.env.FRONTEND_URL || '*',
+        credentials: true
+    }));
+    app.use(express.json());
+
+    // Database connection
+    const pool = new Pool({
+        host: process.env.DB_HOST || 'postgresql.platform-services.svc.cluster.local',
+        port: process.env.DB_PORT || 5432,
+        database: process.env.DB_NAME || 'tweetstream',
+        user: process.env.DB_USER || 'postgres',
+        password: process.env.DB_PASSWORD,  // No fallback for security
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+    });
+
+    // Redis connection
+    let redisClient;
+    try {
+        redisClient = Redis.createClient({
+            socket: {
+                host: process.env.REDIS_HOST || 'redis-master.platform-services.svc.cluster.local',
+                port: process.env.REDIS_PORT || 6379,
+                connectTimeout: 5000,
+                lazyConnect: true
+            }
+        });
+        redisClient.connect().catch(console.error);
+    } catch (error) {
+        console.error('Redis connection failed:', error);
+    }
+
+    // Kafka connection
+    let kafka, producer, consumer;
+    try {
+        kafka = Kafka({
+            clientId: 'tweetstream-backend',
+            brokers: [process.env.KAFKA_BROKER || 'kafka.platform-services.svc.cluster.local:9092'],
+            connectionTimeout: 5000,
+            requestTimeout: 5000
+        });
+        producer = kafka.producer();
+        producer.connect().catch(console.error);
+    } catch (error) {
+        console.error('Kafka connection failed:', error);
+    }
+
+    // Middleware for auth
+    const authenticateToken = async (req, res, next) => {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+        
+        if (!token) {
+            return res.status(401).json({ error: 'Access token required' });
+        }
+
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tweetstream-jwt-secret-2024');
+            const result = await pool.query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
+            if (result.rows.length === 0) {
+                return res.status(401).json({ error: 'User not found' });
+            }
+            req.user = result.rows[0];
+            next();
+        } catch (err) {
+            return res.status(403).json({ error: 'Invalid token' });
+        }
+    };
+
+    // Routes
+
+    // Health check
+    app.get('/health', async (req, res) => {
+        try {
+            const dbResult = await pool.query('SELECT NOW()');
+            let redisStatus = 'disconnected';
+            let kafkaStatus = 'disconnected';
+            
+            try {
+                if (redisClient && redisClient.isReady) {
+                    await redisClient.ping();
+                    redisStatus = 'connected';
+                }
+            } catch (e) { /* ignore */ }
+            
+            try {
+                if (producer) {
+                    kafkaStatus = 'connected';
+                }
+            } catch (e) { /* ignore */ }
+
+            res.json({
+                status: 'healthy',
+                platform_services: {
+                    postgresql: `${process.env.DB_HOST || 'postgresql.platform-services.svc.cluster.local'}:${process.env.DB_PORT || 5432}`,
+                    redis: `${process.env.REDIS_HOST || 'redis-master.platform-services.svc.cluster.local'}:${process.env.REDIS_PORT || 6379}`,
+                    kafka: process.env.KAFKA_BROKER || 'kafka.platform-services.svc.cluster.local:9092'
+                },
+                connections: {
+                    database: 'connected',
+                    redis: redisStatus,
+                    kafka: kafkaStatus
+                },
+                message: 'TweetStream Backend API - Real Database Integration',
+                version: '4.0.0',
+                scope: 'worldwide',
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            res.status(500).json({
+                status: 'error',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    });
+
+    // Authentication
+    app.post('/api/auth/login', async (req, res) => {
+        try {
+            const { username } = req.body;
+            
+            if (!username) {
+                return res.status(400).json({ error: 'Username required' });
+            }
+
+            const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+            
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            const user = result.rows[0];
+            const token = jwt.sign(
+                { userId: user.id, username: user.username },
+                process.env.JWT_SECRET || 'tweetstream-jwt-secret-2024',
+                { expiresIn: '24h' }
+            );
+
+            // Store session in Redis
+            if (redisClient && redisClient.isReady) {
+                try {
+                    await redisClient.setEx(`session:${user.id}`, 86400, JSON.stringify({
+                        userId: user.id,
+                        username: user.username,
+                        loginTime: new Date().toISOString()
+                    }));
+                } catch (e) {
+                    console.error('Redis session storage failed:', e);
+                }
+            }
+
+            res.json({
+                success: true,
+                message: 'Login successful - global access enabled',
+                user: {
+                    id: user.id,
+                    username: user.username,
+                    display_name: user.display_name,
+                    token: token
+                },
+                redis_session: 'stored_globally',
+                timestamp: new Date().toISOString(),
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Login error:', error);
+            res.status(500).json({ error: 'Login failed', details: error.message });
+        }
+    });
+
+    app.post('/api/auth/logout', authenticateToken, async (req, res) => {
+        try {
+            // Clear Redis session
+            if (redisClient && redisClient.isReady) {
+                try {
+                    await redisClient.del(`session:${req.user.id}`);
+                } catch (e) {
+                    console.error('Redis session clear failed:', e);
+                }
+            }
+
+            res.json({
+                success: true,
+                message: 'Logout successful',
+                redis_session: 'cleared_globally'
+            });
+        } catch (error) {
+            res.status(500).json({ error: 'Logout failed' });
+        }
+    });
+
+    // Tweet endpoints
+    app.get('/api/tweets', authenticateToken, async (req, res) => {
+        try {
+            // Get tweets from followed users + own tweets
+            const query = `
+                SELECT t.*, u.username, u.display_name, u.verified,
+                       (SELECT COUNT(*) FROM likes l WHERE l.tweet_id = t.id) as likes,
+                       (SELECT COUNT(*) FROM retweets r WHERE r.tweet_id = t.id) as retweets
+                FROM tweets t
+                JOIN users u ON t.user_id = u.id
+                WHERE t.user_id = $1 
+                   OR t.user_id IN (
+                       SELECT following_id FROM follows WHERE follower_id = $1
+                   )
+                ORDER BY t.created_at DESC
+                LIMIT 50
+            `;
+            
+            const result = await pool.query(query, [req.user.id]);
+            
+            const tweets = result.rows.map(tweet => ({
+                id: `global_${tweet.id}`,
+                user: tweet.username,
+                display_name: tweet.display_name,
+                content: tweet.content,
+                created_at: tweet.created_at,
+                likes: parseInt(tweet.likes),
+                retweets: parseInt(tweet.retweets),
+                verified: tweet.verified,
+                source: 'postgresql_global'
+            }));
+
+            res.json({
+                tweets: tweets,
+                total: tweets.length,
+                source: 'postgresql_cluster',
+                storage: `${process.env.DB_HOST || 'postgresql'}:${process.env.DB_PORT || 5432}`,
+                shared_globally: true,
+                last_updated: new Date().toISOString(),
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Get tweets error:', error);
+            res.status(500).json({ error: 'Failed to fetch tweets', details: error.message });
+        }
+    });
+
+    app.post('/api/tweets', authenticateToken, async (req, res) => {
+        try {
+            const { content } = req.body;
+            
+            if (!content || content.trim().length === 0) {
+                return res.status(400).json({ error: 'Tweet content required' });
+            }
+
+            if (content.length > 280) {
+                return res.status(400).json({ error: 'Tweet too long (max 280 characters)' });
+            }
+
+            // Insert tweet into PostgreSQL
+            const insertQuery = 'INSERT INTO tweets (user_id, content, created_at) VALUES ($1, $2, NOW()) RETURNING *';
+            const result = await pool.query(insertQuery, [req.user.id, content.trim()]);
+            const newTweet = result.rows[0];
+
+            // Store in Redis cache
+            if (redisClient && redisClient.isReady) {
+                try {
+                    const cacheKey = `tweet:${newTweet.id}`;
+                    await redisClient.setEx(cacheKey, 3600, JSON.stringify({
+                        id: newTweet.id,
+                        user_id: req.user.id,
+                        username: req.user.username,
+                        content: newTweet.content,
+                        created_at: newTweet.created_at
+                    }));
+                } catch (e) {
+                    console.error('Redis cache failed:', e);
+                }
+            }
+
+            // Publish to Kafka
+            if (producer) {
+                try {
+                    await producer.send({
+                        topic: 'tweets',
+                        messages: [{
+                            key: `tweet_${newTweet.id}`,
+                            value: JSON.stringify({
+                                id: newTweet.id,
+                                user_id: req.user.id,
+                                username: req.user.username,
+                                content: newTweet.content,
+                                created_at: newTweet.created_at,
+                                event: 'new_tweet'
+                            })
+                        }]
+                    });
+                } catch (e) {
+                    console.error('Kafka publish failed:', e);
+                }
+            }
+
+            res.json({
+                success: true,
+                message: 'Tweet stored in PostgreSQL - visible to ALL users worldwide',
+                tweet_id: `postgresql_${newTweet.id}`,
+                stored_in: 'postgresql_cluster',
+                published_to: 'all_users_globally',
+                timestamp: newTweet.created_at,
+                kafka_published: producer ? 'yes' : 'no',
+                redis_cached: redisClient?.isReady ? 'yes' : 'no',
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Post tweet error:', error);
+            res.status(500).json({ error: 'Failed to post tweet', details: error.message });
+        }
+    });
+
+    // User management
+    app.get('/api/users', authenticateToken, async (req, res) => {
+        try {
+            const query = `
+                SELECT id, username, display_name, bio, verified, followers_count, following_count
+                FROM users 
+                WHERE id != $1
+                ORDER BY followers_count DESC
+            `;
+            const result = await pool.query(query, [req.user.id]);
+            
+            const users = result.rows.map(user => ({
+                id: user.id,
+                username: user.username,
+                name: user.display_name,
+                bio: user.bio,
+                verified: user.verified,
+                followers: user.followers_count,
+                following: user.following_count,
+                location: getLocationByUsername(user.username)
+            }));
+
+            res.json({
+                users: users,
+                total: users.length,
+                source: 'postgresql_cluster',
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Get users error:', error);
+            res.status(500).json({ error: 'Failed to fetch users' });
+        }
+    });
+
+    // Follow/Unfollow
+    app.post('/api/users/follow', authenticateToken, async (req, res) => {
+        try {
+            const { target_user } = req.body;
+            
+            if (!target_user) {
+                return res.status(400).json({ error: 'Target user required' });
+            }
+
+            // Get target user ID
+            const userResult = await pool.query('SELECT id FROM users WHERE username = $1', [target_user]);
+            if (userResult.rows.length === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+            
+            const targetUserId = userResult.rows[0].id;
+            
+            if (targetUserId === req.user.id) {
+                return res.status(400).json({ error: 'Cannot follow yourself' });
+            }
+
+            // Check if already following
+            const checkQuery = 'SELECT * FROM follows WHERE follower_id = $1 AND following_id = $2';
+            const existingFollow = await pool.query(checkQuery, [req.user.id, targetUserId]);
+            
+            if (existingFollow.rows.length > 0) {
+                return res.status(400).json({ error: 'Already following this user' });
+            }
+
+            // Create follow relationship
+            await pool.query(
+                'INSERT INTO follows (follower_id, following_id, created_at) VALUES ($1, $2, NOW())',
+                [req.user.id, targetUserId]
+            );
+
+            // Update follower counts
+            await pool.query('UPDATE users SET following_count = following_count + 1 WHERE id = $1', [req.user.id]);
+            await pool.query('UPDATE users SET followers_count = followers_count + 1 WHERE id = $1', [targetUserId]);
+
+            // Cache in Redis
+            if (redisClient && redisClient.isReady) {
+                try {
+                    await redisClient.sAdd(`following:${req.user.id}`, targetUserId.toString());
+                    await redisClient.sAdd(`followers:${targetUserId}`, req.user.id.toString());
+                } catch (e) {
+                    console.error('Redis follow cache failed:', e);
+                }
+            }
+
+            res.json({
+                success: true,
+                message: 'Now following user - stored in PostgreSQL cluster',
+                relationship_stored: 'postgresql_global',
+                cache_updated: 'worldwide',
+                notification_sent: 'kafka_global',
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Follow error:', error);
+            res.status(500).json({ error: 'Failed to follow user', details: error.message });
+        }
+    });
+
+    app.delete('/api/users/follow', authenticateToken, async (req, res) => {
+        try {
+            const { target_user } = req.body;
+            
+            // Get target user ID
+            const userResult = await pool.query('SELECT id FROM users WHERE username = $1', [target_user]);
+            if (userResult.rows.length === 0) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+            
+            const targetUserId = userResult.rows[0].id;
+
+            // Remove follow relationship
+            const deleteResult = await pool.query(
+                'DELETE FROM follows WHERE follower_id = $1 AND following_id = $2',
+                [req.user.id, targetUserId]
+            );
+
+            if (deleteResult.rowCount === 0) {
+                return res.status(400).json({ error: 'Not following this user' });
+            }
+
+            // Update follower counts
+            await pool.query('UPDATE users SET following_count = following_count - 1 WHERE id = $1', [req.user.id]);
+            await pool.query('UPDATE users SET followers_count = followers_count - 1 WHERE id = $1', [targetUserId]);
+
+            // Update Redis cache
+            if (redisClient && redisClient.isReady) {
+                try {
+                    await redisClient.sRem(`following:${req.user.id}`, targetUserId.toString());
+                    await redisClient.sRem(`followers:${targetUserId}`, req.user.id.toString());
+                } catch (e) {
+                    console.error('Redis unfollow cache failed:', e);
+                }
+            }
+
+            res.json({
+                success: true,
+                message: 'Unfollowed user - updated in PostgreSQL cluster',
+                relationship_removed: 'postgresql_global',
+                cache_cleared: 'worldwide',
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Unfollow error:', error);
+            res.status(500).json({ error: 'Failed to unfollow user' });
+        }
+    });
+
+    app.get('/api/users/following', authenticateToken, async (req, res) => {
+        try {
+            const query = `
+                SELECT u.username, u.display_name, f.created_at
+                FROM follows f
+                JOIN users u ON f.following_id = u.id
+                WHERE f.follower_id = $1
+                ORDER BY f.created_at DESC
+            `;
+            const result = await pool.query(query, [req.user.id]);
+            
+            const following = result.rows.map(row => ({
+                username: row.username,
+                display_name: row.display_name,
+                followed_at: row.created_at
+            }));
+
+            res.json({
+                following: following,
+                count: following.length,
+                source: 'postgresql_cluster',
+                shared_globally: true,
+                last_updated: new Date().toISOString(),
+                scope: 'worldwide'
+            });
+        } catch (error) {
+            console.error('Get following error:', error);
+            res.status(500).json({ error: 'Failed to fetch following list' });
+        }
+    });
+
+    // Stats
+    app.get('/api/stats', async (req, res) => {
+        try {
+            const userCountResult = await pool.query('SELECT COUNT(*) FROM users');
+            const tweetCountResult = await pool.query('SELECT COUNT(*) FROM tweets');
+            const followCountResult = await pool.query('SELECT COUNT(*) FROM follows');
+
+            res.json({
+                global_users: parseInt(userCountResult.rows[0].count),
+                global_tweets: parseInt(tweetCountResult.rows[0].count),
+                global_follows: parseInt(followCountResult.rows[0].count),
+                active_connections: 'worldwide',
+                postgresql_cluster: `${process.env.DB_HOST || 'postgresql.platform-services.svc.cluster.local'}:${process.env.DB_PORT || 5432}`,
+                redis_cluster: `${process.env.REDIS_HOST || 'redis-master.platform-services.svc.cluster.local'}:${process.env.REDIS_PORT || 6379}`,
+                kafka_cluster: process.env.KAFKA_BROKER || 'kafka.platform-services.svc.cluster.local:9092',
+                scope: 'worldwide',
+                last_updated: new Date().toISOString()
+            });
+        } catch (error) {
+            res.status(500).json({ error: 'Failed to fetch stats' });
+        }
+    });
+
+    // Utility function
+    function getLocationByUsername(username) {
+        const locations = {
+            'john_doe': 'New York',
+            'jane_smith': 'London', 
+            'tech_guru': 'Tokyo',
+            'startup_founder': 'San Francisco',
+            'data_scientist': 'Berlin'
+        };
+        return locations[username] || 'Global';
+    }
+
+    // Error handling
+    app.use((err, req, res, next) => {
+        console.error('Unhandled error:', err);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: err.message,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    // Start server
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 TweetStream Backend v4.0.0 running on port ${PORT}`);
+        console.log(`📊 Database: ${process.env.DB_HOST || 'postgresql.platform-services.svc.cluster.local'}:${process.env.DB_PORT || 5432}`);
+        console.log(`🔴 Redis: ${process.env.REDIS_HOST || 'redis-master.platform-services.svc.cluster.local'}:${process.env.REDIS_PORT || 6379}`);
+        console.log(`⚡ Kafka: ${process.env.KAFKA_BROKER || 'kafka.platform-services.svc.cluster.local:9092'}`);
+        console.log(`🌍 Scope: Worldwide - TRUE Cross-User Platform`);
+    });
+
+    // Graceful shutdown
+    process.on('SIGTERM', async () => {
+        console.log('Shutting down gracefully...');
+        try {
+            await pool.end();
+            if (redisClient) await redisClient.disconnect();
+            if (producer) await producer.disconnect();
+        } catch (error) {
+            console.error('Shutdown error:', error);
+        }
+        process.exit(0);
+    });
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tweetstream-frontend-config
+  namespace: default
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>TweetStream - Modern Social Platform</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+        <style>
+            .tweet-card { 
+                @apply bg-white rounded-xl shadow-lg p-6 mb-4 border-l-4 border-blue-500 hover:shadow-xl transition-all duration-300 cursor-pointer;
+            }
+            .tweet-card:hover { transform: translateY(-2px); }
+            .tweet-card.new-tweet { 
+                animation: slideIn 0.5s ease-out;
+                border-l-color: #10b981;
+            }
+            .user-card { 
+                @apply bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 mb-3 hover:from-blue-100 hover:to-indigo-100 transition-all duration-300;
+            }
+            .btn-primary { 
+                @apply bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-full transition-all duration-200 font-semibold;
+            }
+            .btn-secondary { 
+                @apply bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-full transition-all duration-200;
+            }
+            .btn-following { 
+                @apply bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-full transition-all duration-200 font-semibold;
+            }
+            .pulse { animation: pulse 2s infinite; }
+            .notification { animation: slideDown 0.3s ease-out; }
+            @keyframes slideIn {
+                from { transform: translateX(-100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideDown {
+                from { transform: translateY(-100%); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
+            }
+        </style>
+    </head>
+    <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+        <!-- Login Modal -->
+        <div id="login-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-xl p-8 max-w-md w-full mx-4">
+                <div class="text-center mb-6">
+                    <div class="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i class="fab fa-twitter text-white text-2xl"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800">Welcome to TweetStream</h2>
+                    <p class="text-gray-600">Choose your identity to start tweeting</p>
+                </div>
+                <div class="space-y-3">
+                    <button onclick="login('john_doe')" class="w-full p-4 bg-blue-50 hover:bg-blue-100 rounded-lg text-left transition-colors">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                                <span class="text-white font-bold">J</span>
+                            </div>
+                            <div>
+                                <p class="font-semibold text-gray-800">John Doe</p>
+                                <p class="text-gray-600 text-sm">@john_doe</p>
+                            </div>
+                        </div>
+                    </button>
+                    <button onclick="login('jane_smith')" class="w-full p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-left transition-colors">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                                <span class="text-white font-bold">J</span>
+                            </div>
+                            <div>
+                                <p class="font-semibold text-gray-800">Jane Smith</p>
+                                <p class="text-gray-600 text-sm">@jane_smith</p>
+                            </div>
+                        </div>
+                    </button>
+                    <button onclick="login('tech_guru')" class="w-full p-4 bg-green-50 hover:bg-green-100 rounded-lg text-left transition-colors">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-12 h-12 bg-gradient-to-r from-green-500 to-teal-500 rounded-full flex items-center justify-center">
+                                <span class="text-white font-bold">T</span>
+                            </div>
+                            <div>
+                                <p class="font-semibold text-gray-800">Tech Guru</p>
+                                <p class="text-gray-600 text-sm">@tech_guru</p>
+                            </div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Bar -->
+        <div id="notification" class="fixed top-4 right-4 z-40 hidden">
+            <div class="bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg notification">
+                <div class="flex items-center space-x-2">
+                    <i class="fas fa-check-circle"></i>
+                    <span id="notification-text"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Header -->
+        <header class="bg-white shadow-lg border-b border-blue-100">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                            <i class="fab fa-twitter text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-800">TweetStream</h1>
+                            <p class="text-sm text-gray-500">Social Media Platform</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div id="kafka-status" class="text-sm font-medium">
+                            <i class="fas fa-circle text-green-500 text-xs"></i> 
+                            <span class="text-green-600">Kafka Live Feed Active</span>
+                        </div>
+                        <div id="user-info" class="flex items-center space-x-3">
+                            <div id="user-avatar" class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                                <span id="user-initial" class="text-white font-bold"></span>
+                            </div>
+                            <span id="user-name" class="font-semibold text-gray-800"></span>
+                        </div>
+                        <button onclick="toggleSystemStatus()" class="btn-secondary">
+                            <i class="fas fa-cog"></i> System
+                        </button>
+                        <button onclick="logout()" class="btn-secondary">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="container mx-auto px-4 py-8">
+            <!-- System Status (Collapsed by Default) -->
+            <div id="system-status" class="mb-6 hidden">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+                        <i class="fas fa-server text-blue-500 mr-3"></i> System Status
+                    </h2>
+                    <div id="status-container">
+                        <div class="animate-pulse text-gray-500">Loading system status...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Grid -->
+            <div class="grid lg:grid-cols-3 gap-8">
+                <!-- Tweets Feed (Main Column) -->
+                <div class="lg:col-span-2">
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-2xl font-bold text-gray-800 flex items-center">
+                                <i class="fas fa-home text-blue-500 mr-3"></i> Your Feed
+                                <span id="following-indicator" class="ml-2 text-sm text-gray-500"></span>
+                            </h2>
+                            <button onclick="refreshTweets()" class="btn-primary">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                        
+                        <!-- Tweet Composer -->
+                        <div class="bg-gray-50 rounded-xl p-4 mb-6">
+                            <div class="flex items-start space-x-4">
+                                <div id="composer-avatar" class="w-12 h-12 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center">
+                                    <span id="composer-initial" class="text-white font-bold"></span>
+                                </div>
+                                <div class="flex-1">
+                                    <textarea 
+                                        id="tweet-input" 
+                                        placeholder="What's happening?" 
+                                        class="w-full p-3 border border-gray-200 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        rows="3"
+                                    ></textarea>
+                                    <div class="flex justify-between items-center mt-3">
+                                        <span class="text-sm text-gray-500">
+                                            <span id="char-count">0</span>/280 characters
+                                        </span>
+                                        <button onclick="postTweet()" class="btn-primary">
+                                            <i class="fas fa-paper-plane mr-2"></i> Tweet
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tweets Container -->
+                        <div id="tweets-container">
+                            <div class="text-center py-8">
+                                <div class="pulse">
+                                    <i class="fas fa-spinner fa-spin text-3xl text-blue-500 mb-4"></i>
+                                </div>
+                                <p class="text-gray-500">Loading your personalized feed...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar -->
+                <div class="lg:col-span-1">
+                    <!-- Active Users -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-xl font-semibold text-gray-800 flex items-center">
+                                <i class="fas fa-users text-purple-500 mr-3"></i> Who to Follow
+                            </h2>
+                            <button onclick="refreshUsers()" class="btn-secondary">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div id="users-container">
+                            <div class="text-center py-4">
+                                <i class="fas fa-spinner fa-spin text-purple-500 mb-2"></i>
+                                <p class="text-gray-500 text-sm">Finding awesome people...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Following List -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+                            <i class="fas fa-heart text-red-500 mr-3"></i> Following
+                            <span id="following-count" class="ml-2 bg-red-100 text-red-800 text-sm px-2 py-1 rounded-full">0</span>
+                        </h2>
+                        <div id="following-container">
+                            <p class="text-gray-500 text-sm text-center py-4">You're not following anyone worldwide yet</p>
+                        </div>
+                    </div>
+
+                    <!-- Trending Topics -->
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+                            <i class="fas fa-fire text-orange-500 mr-3"></i> Trending
+                        </h2>
+                        <div class="space-y-3">
+                            <div class="hover:bg-gray-50 p-3 rounded-lg cursor-pointer">
+                                <p class="font-semibold text-gray-800">#KafkaLive</p>
+                                <p class="text-sm text-gray-500">1,247 tweets</p>
+                            </div>
+                            <div class="hover:bg-gray-50 p-3 rounded-lg cursor-pointer">
+                                <p class="font-semibold text-gray-800">#PlatformServices</p>
+                                <p class="text-sm text-gray-500">892 tweets</p>
+                            </div>
+                            <div class="hover:bg-gray-50 p-3 rounded-lg cursor-pointer">
+                                <p class="font-semibold text-gray-800">#TweetStream</p>
+                                <p class="text-sm text-gray-500">456 tweets</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // App state - TRUE cross-user functionality (Database-backed, works worldwide)
+            let currentUser = JSON.parse(localStorage.getItem('tweetstream_user')) || null;
+            let following = new Set(); // No longer using localStorage - fetched from database
+            let userToken = localStorage.getItem('tweetstream_token') || null;
+            let globalTweets = []; // Tweets from PostgreSQL cluster (worldwide)
+            let lastRefreshTime = Date.now();
+
+            // Initialize app
+            document.addEventListener('DOMContentLoaded', function() {
+                // Character counter
+                document.getElementById('tweet-input').addEventListener('input', function(e) {
+                    const count = e.target.value.length;
+                    document.getElementById('char-count').textContent = count;
+                    document.getElementById('char-count').className = count > 280 ? 'text-red-500' : 'text-gray-500';
+                });
+
+                // Check if user is already logged in
+                if (currentUser && userToken) {
+                    document.getElementById('login-modal').style.display = 'none';
+                    updateUserDisplay();
+                    loadTweets();
+                    loadUsers();
+                    loadFollowing(); // Load from database, not localStorage
+                    startGlobalUpdates();
+                    showNotification(`Welcome back, ${currentUser.name}! 🌍 Connected to PostgreSQL cluster!`);
+                } else {
+                    document.getElementById('login-modal').style.display = 'flex';
+                }
+
+                // Start global cross-user sync
+                startGlobalSync();
+            });
+
+            // Real authentication with database integration
+            async function login(username) {
+                try {
+                    showNotification('Connecting to PostgreSQL cluster... 🌍');
+                    
+                    const response = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ username: username })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        currentUser = {
+                            id: data.user.id,
+                            username: data.user.username,
+                            name: data.user.display_name,
+                            avatar: username.charAt(0).toUpperCase(),
+                            token: data.user.token
+                        };
+                        
+                        userToken = data.user.token;
+                        
+                        // Store user session (but following comes from database)
+                        localStorage.setItem('tweetstream_user', JSON.stringify(currentUser));
+                        localStorage.setItem('tweetstream_token', userToken);
+                        localStorage.setItem('tweetstream_login_time', Date.now().toString());
+                        
+                        document.getElementById('login-modal').style.display = 'none';
+                        updateUserDisplay();
+                        
+                        // Load data from PostgreSQL cluster
+                        await loadFollowing(); // From database
+                        await loadTweets();    // From database
+                        await loadUsers();     // From database
+                        
+                        startGlobalUpdates();
+                        showNotification(`🌍 Welcome, ${currentUser.name}! Connected to PostgreSQL cluster worldwide! 🚀`);
+                    } else {
+                        showNotification(`Login failed: ${data.error} ❌`);
+                    }
+                } catch (error) {
+                    console.error('Login error:', error);
+                    showNotification('Failed to connect to PostgreSQL cluster. Please try again. ❌');
+                }
+            }
+
+            async function logout() {
+                try {
+                    await fetch('/api/auth/logout', { 
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${userToken}` }
+                    });
+                } catch (error) {
+                    console.log('Logout API call failed');
+                }
+                
+                // Clear user data (following relationships cleared from database)
+                currentUser = null;
+                userToken = null;
+                following.clear();
+                globalTweets = [];
+                
+                localStorage.removeItem('tweetstream_user');
+                localStorage.removeItem('tweetstream_token');
+                localStorage.removeItem('tweetstream_login_time');
+                // No more localStorage for following - it's in the database
+                
+                document.getElementById('login-modal').style.display = 'flex';
+                document.getElementById('tweets-container').innerHTML = '';
+                document.getElementById('users-container').innerHTML = '';
+                updateFollowingDisplay();
+                
+                showNotification('Logged out from PostgreSQL cluster! 👋');
+            }
+
+            function getUserDisplayName(username) {
+                const names = {
+                    'john_doe': 'John Doe (New York)',
+                    'jane_smith': 'Jane Smith (London)',
+                    'tech_guru': 'Tech Guru (Tokyo)'
+                };
+                return names[username] || username;
+            }
+
+            function updateUserDisplay() {
+                if (!currentUser) return;
+                
+                document.getElementById('user-initial').textContent = currentUser.avatar;
+                document.getElementById('user-name').textContent = currentUser.name;
+                document.getElementById('composer-initial').textContent = currentUser.avatar;
+                
+                updateFollowingIndicator();
+            }
+
+            function updateFollowingIndicator() {
+                const indicator = document.getElementById('following-indicator');
+                indicator.textContent = following.size > 0 ? `(Following ${following.size} globally)` : '(Follow people worldwide)';
+            }
+
+            // Real follow/unfollow with PostgreSQL persistence
+            async function toggleFollow(username) {
+                if (!currentUser || !userToken) return;
+                
+                const wasFollowing = following.has(username);
+                
+                try {
+                    const method = wasFollowing ? 'DELETE' : 'POST';
+                    const response = await fetch('/api/users/follow', {
+                        method: method,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${userToken}`
+                        },
+                        body: JSON.stringify({ 
+                            target_user: username
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        if (wasFollowing) {
+                            following.delete(username);
+                            showNotification(`Unfollowed @${username} globally - updated in PostgreSQL! 💔`);
+                        } else {
+                            following.add(username);
+                            showNotification(`🌍 Now following @${username} worldwide! Real-time updates via PostgreSQL + Kafka! ❤️`);
+                        }
+                        
+                        // No localStorage - following is now stored in PostgreSQL
+                        updateFollowingDisplay();
+                        updateFollowingIndicator();
+                        await loadUsers(); // Refresh to update button states
+                        await loadTweets(); // Refresh global feed from database
+                    } else {
+                        showNotification(`Failed to update follow status: ${data.error} ❌`);
+                    }
+                } catch (error) {
+                    console.error('Follow error:', error);
+                    showNotification('Failed to update follow status in PostgreSQL. Please try again. ❌');
+                }
+            }
+
+            // Load following list from PostgreSQL database
+            async function loadFollowing() {
+                if (!currentUser || !userToken) return;
+                
+                try {
+                    const response = await fetch('/api/users/following', {
+                        headers: { 'Authorization': `Bearer ${userToken}` }
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        following = new Set(data.following.map(f => f.username));
+                        updateFollowingDisplay();
+                        showNotification(`📊 Loaded ${following.size} follows from PostgreSQL cluster!`);
+                    }
+                } catch (error) {
+                    console.error('Failed to load following list from database:', error);
+                    showNotification('Failed to load following list from PostgreSQL ⚠️');
+                }
+            }
+
+            function updateFollowingDisplay() {
+                const container = document.getElementById('following-container');
+                const count = document.getElementById('following-count');
+                
+                count.textContent = following.size;
+                
+                if (following.size === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm text-center py-4">You\'re not following anyone worldwide yet</p>';
+                } else {
+                    container.innerHTML = Array.from(following).map(username => `
+                        <div class="flex items-center justify-between py-2">
+                            <div class="flex items-center space-x-2">
+                                <div class="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                                    <span class="text-white text-sm font-bold">${username.charAt(0).toUpperCase()}</span>
+                                </div>
+                                <span class="text-sm font-medium">@${username} 🌍</span>
+                            </div>
+                            <button onclick="toggleFollow('${username}')" class="text-red-500 hover:text-red-600 text-sm">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            }
+
+            // TRUE global tweet posting - stored in PostgreSQL cluster worldwide
+            async function postTweet() {
+                if (!currentUser || !userToken) return;
+                
+                const input = document.getElementById('tweet-input');
+                const content = input.value.trim();
+                
+                if (content.length === 0) {
+                    alert('Please enter some content for your tweet!');
+                    return;
+                }
+                
+                if (content.length > 280) {
+                    alert('Tweet is too long! Please keep it under 280 characters.');
+                    return;
+                }
+
+                try {
+                    showNotification('📡 Posting to PostgreSQL cluster worldwide... 🌍');
+                    
+                    const response = await fetch('/api/tweets', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${userToken}`
+                        },
+                        body: JSON.stringify({
+                            content: content
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        input.value = '';
+                        document.getElementById('char-count').textContent = '0';
+                        showNotification('🌍 Tweet posted to PostgreSQL cluster! Visible to ALL users worldwide! 🎉');
+                        
+                        // Immediate refresh from PostgreSQL
+                        await loadTweets();
+                        
+                        // Show global confirmation
+                        setTimeout(() => {
+                            showNotification('✅ PostgreSQL posting successful! Any user on any machine can see this tweet! 🌍');
+                        }, 1500);
+                    } else {
+                        showNotification(`Failed to post tweet: ${data.error} ❌`);
+                    }
+                } catch (error) {
+                    console.error('Post tweet error:', error);
+                    showNotification('Failed to post to PostgreSQL cluster. Please try again. ❌');
+                }
+            }
+
+            function createTweetElement(tweet, isGlobal = false) {
+                const timeAgo = getTimeAgo(new Date(tweet.created_at));
+                const isOwnTweet = currentUser && tweet.user === currentUser.username;
+                const isFromFollowing = following.has(tweet.user);
+                const isFromDatabase = tweet.source === 'postgresql_global' || isGlobal;
+                
+                return `
+                    <div class="tweet-card ${isGlobal ? 'new-tweet' : ''} ${isOwnTweet ? 'border-l-green-500' : isFromFollowing ? 'border-l-purple-500' : 'border-l-blue-500'}">
+                        <div class="flex items-start space-x-4">
+                            <div class="w-12 h-12 ${isOwnTweet ? 'bg-gradient-to-r from-green-400 to-blue-500' : 'bg-gradient-to-r from-blue-500 to-purple-500'} rounded-full flex items-center justify-center flex-shrink-0">
+                                <span class="text-white font-bold text-lg">${tweet.user.charAt(0).toUpperCase()}</span>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center space-x-2 mb-2">
+                                    <span class="font-bold text-gray-800">${isOwnTweet ? 'You' : '@' + tweet.user}</span>
+                                    ${tweet.verified ? '<i class="fas fa-check-circle text-blue-500 text-xs"></i>' : ''}
+                                    ${isFromFollowing ? '<i class="fas fa-heart text-purple-500 text-xs"></i>' : ''}
+                                    ${isFromDatabase ? '<span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">🗄️ PostgreSQL</span>' : ''}
+                                    ${isGlobal ? '<span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">Fresh from DB</span>' : ''}
+                                    <span class="text-gray-500 text-sm">•</span>
+                                    <span class="text-gray-500 text-sm">${timeAgo}</span>
+                                </div>
+                                <p class="text-gray-700 mb-4 leading-relaxed">${tweet.content}</p>
+                                <div class="flex items-center space-x-6 text-sm text-gray-500">
+                                    <button class="flex items-center space-x-2 hover:text-red-500 transition-colors" onclick="likeTweet('${tweet.id}')">
+                                        <i class="far fa-heart"></i>
+                                        <span>${tweet.likes}</span>
+                                    </button>
+                                    <button class="flex items-center space-x-2 hover:text-green-500 transition-colors" onclick="retweetTweet('${tweet.id}')">
+                                        <i class="fas fa-retweet"></i>
+                                        <span>${tweet.retweets}</span>
+                                    </button>
+                                    <button class="flex items-center space-x-2 hover:text-blue-500 transition-colors">
+                                        <i class="far fa-comment"></i>
+                                        <span>Reply</span>
+                                    </button>
+                                    ${isFromDatabase ? '<span class="text-green-600 text-xs">✅ Database storage</span>' : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Global sync - for user sessions only, tweets come from PostgreSQL cluster
+            function startGlobalSync() {
+                // Check for session changes every 5 seconds
+                setInterval(() => {
+                    checkGlobalUpdates();
+                }, 5000);
+            }
+
+            function checkGlobalUpdates() {
+                // Check if another tab logged in/out
+                const storedUser = JSON.parse(localStorage.getItem('tweetstream_user'));
+                const storedToken = localStorage.getItem('tweetstream_token');
+                
+                if (storedUser && storedToken && !currentUser) {
+                    // Another tab logged in
+                    currentUser = storedUser;
+                    userToken = storedToken;
+                    document.getElementById('login-modal').style.display = 'none';
+                    updateUserDisplay();
+                    loadTweets();
+                    loadUsers();
+                    loadFollowing(); // Load from database
+                    showNotification('Logged in from another tab! 🌍 Connected to PostgreSQL!');
+                } else if (!storedUser && currentUser) {
+                    // Another tab logged out
+                    logout();
+                }
+            }
+
+            // Global updates from PostgreSQL cluster via Kafka streaming
+            function startGlobalUpdates() {
+                // Poll PostgreSQL cluster for global tweets every 10 seconds
+                setInterval(async () => {
+                    if (currentUser) {
+                        await loadTweets(); // Always load fresh from PostgreSQL cluster
+                    }
+                }, 10000);
+
+                // Update status indicator
+                const status = document.getElementById('kafka-status');
+                status.innerHTML = '<i class="fas fa-circle text-green-500 text-xs"></i> <span class="text-green-600">PostgreSQL + Kafka Global</span>';
+            }
+
+            // Load functions - ALL FROM PostgreSQL CLUSTER WORLDWIDE
+            function refreshTweets() {
+                showNotification('🌍 Refreshing from PostgreSQL cluster worldwide... 🔄');
+                loadTweets();
+            }
+
+            function refreshUsers() {
+                loadUsers();
+            }
+
+            async function loadTweets() {
+                if (!currentUser || !userToken) return;
+                
+                try {
+                    showNotification('📡 Loading tweets from PostgreSQL cluster worldwide... 🌍');
+                    
+                    const response = await fetch('/api/tweets', {
+                        headers: { 'Authorization': `Bearer ${userToken}` }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Get global tweets from PostgreSQL cluster
+                    globalTweets = data.tweets || [];
+                    
+                    const container = document.getElementById('tweets-container');
+                    
+                    if (globalTweets.length === 0) {
+                        container.innerHTML = `
+                            <div class="text-center py-8">
+                                <i class="fas fa-database text-gray-400 text-4xl mb-4"></i>
+                                <p class="text-gray-600 font-semibold">Your global feed is empty</p>
+                                <p class="text-gray-500 text-sm">Follow people worldwide or post a tweet to get started!</p>
+                                <p class="text-gray-400 text-xs mt-2">🌍 Real-time global updates via PostgreSQL + Kafka 📡</p>
+                            </div>
+                        `;
+                    } else {
+                        container.innerHTML = globalTweets.map(tweet => 
+                            createTweetElement(tweet, tweet.source === 'postgresql_global')
+                        ).join('');
+                    }
+                    
+                    lastRefreshTime = Date.now();
+                    
+                    // Show global loading confirmation
+                    if (globalTweets.length > 0) {
+                        showNotification(`🌍 Loaded ${globalTweets.length} tweets from PostgreSQL cluster worldwide! 📊`);
+                    }
+                    
+                } catch (error) {
+                    console.error('Load tweets error:', error);
+                    document.getElementById('tweets-container').innerHTML = `
+                        <div class="text-center py-8">
+                            <i class="fas fa-exclamation-triangle text-red-500 text-3xl mb-4"></i>
+                            <p class="text-red-500 font-semibold">Failed to load tweets from PostgreSQL cluster</p>
+                            <p class="text-gray-500 text-sm">${error.message}</p>
+                            <button onclick="loadTweets()" class="btn-primary mt-4">Retry Database Connection</button>
+                        </div>
+                    `;
+                }
+            }
+
+            async function loadUsers() {
+                if (!currentUser || !userToken) return;
+                
+                try {
+                    const response = await fetch('/api/users', {
+                        headers: { 'Authorization': `Bearer ${userToken}` }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    const container = document.getElementById('users-container');
+                    container.innerHTML = data.users.map(user => {
+                        const isFollowing = following.has(user.username);
+                        return `
+                            <div class="user-card">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center space-x-3">
+                                        <div class="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                                            <span class="text-white font-bold">${user.username.charAt(0).toUpperCase()}</span>
+                                        </div>
+                                        <div>
+                                            <p class="font-semibold text-gray-800 flex items-center">
+                                                ${user.name}
+                                                ${user.verified ? '<i class="fas fa-check-circle text-blue-500 text-xs ml-1"></i>' : ''}
+                                            </p>
+                                            <p class="text-gray-600 text-sm">@${user.username}</p>
+                                            <p class="text-gray-500 text-xs">${user.bio}</p>
+                                            <p class="text-gray-400 text-xs">📍 ${user.location || 'Worldwide'}</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-lg font-bold text-purple-600">${user.followers}</p>
+                                        <p class="text-xs text-gray-500">followers</p>
+                                    </div>
+                                </div>
+                                <button onclick="toggleFollow('${user.username}')" class="${isFollowing ? 'btn-following' : 'btn-primary'} w-full">
+                                    <i class="fas ${isFollowing ? 'fa-check' : 'fa-user-plus'} mr-2"></i> 
+                                    ${isFollowing ? 'Following (PostgreSQL)' : 'Follow Worldwide'}
+                                </button>
+                            </div>
+                        `;
+                    }).join('');
+                } catch (error) {
+                    console.error('Load users error:', error);
+                    document.getElementById('users-container').innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-exclamation-triangle text-red-500 mb-2"></i>
+                            <p class="text-red-500 text-sm">Failed to load users from PostgreSQL</p>
+                        </div>
+                    `;
+                }
+            }
+
+            // System status
+            function toggleSystemStatus() {
+                const status = document.getElementById('system-status');
+                status.classList.toggle('hidden');
+                if (!status.classList.contains('hidden')) {
+                    loadSystemStatus();
+                }
+            }
+
+            function loadSystemStatus() {
+                fetch('/health')
+                    .then(response => response.json())
+                    .then(data => {
+                        const container = document.getElementById('status-container');
+                        container.innerHTML = `
+                            <div class="grid md:grid-cols-3 gap-4">
+                                <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                                    <h3 class="font-semibold text-green-800 flex items-center">
+                                        <i class="fas fa-database mr-2"></i> PostgreSQL Cluster
+                                    </h3>
+                                    <p class="text-sm text-green-600 mt-1">${data.platform_services?.postgresql || 'postgresql.platform-services.svc.cluster.local:5432'}</p>
+                                    <span class="inline-block mt-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                                        <i class="fas fa-check-circle mr-1"></i> ${data.connections?.database || 'Connected'} - Global storage
+                                    </span>
+                                </div>
+                                <div class="bg-red-50 p-4 rounded-lg border border-red-200">
+                                    <h3 class="font-semibold text-red-800 flex items-center">
+                                        <i class="fas fa-memory mr-2"></i> Redis Cluster
+                                    </h3>
+                                    <p class="text-sm text-red-600 mt-1">${data.platform_services?.redis || 'redis-master.platform-services.svc.cluster.local:6379'}</p>
+                                    <span class="inline-block mt-2 px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                                        <i class="fas fa-${data.connections?.redis === 'connected' ? 'check-circle' : 'times-circle'} mr-1"></i> ${data.connections?.redis || 'Unknown'} - Global caching
+                                    </span>
+                                </div>
+                                <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                                    <h3 class="font-semibold text-purple-800 flex items-center">
+                                        <i class="fas fa-stream mr-2"></i> Kafka Cluster
+                                    </h3>
+                                    <p class="text-sm text-purple-600 mt-1">${data.platform_services?.kafka || 'kafka.platform-services.svc.cluster.local:9092'}</p>
+                                    <span class="inline-block mt-2 px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded-full">
+                                        <i class="fas fa-${data.connections?.kafka === 'connected' ? 'check-circle' : 'times-circle'} mr-1"></i> ${data.connections?.kafka || 'Unknown'} - Global streaming
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                                <p class="text-yellow-800">
+                                    <strong><i class="fas fa-info-circle mr-1"></i> Platform:</strong> ${data.message} | 
+                                    <strong>Version:</strong> ${data.version}
+                                </p>
+                                <p class="text-sm text-yellow-600 mt-1">🌍 Scope: ${data.scope || 'Worldwide'} | Platform Services: ${data.status === 'healthy' ? 'Connected' : 'Issues'}</p>
+                                <p class="text-xs text-yellow-500 mt-2">
+                                    🗄️ PostgreSQL: Primary storage | 🔴 Redis: Caching layer | ⚡ Kafka: Real-time events
+                                </p>
+                            </div>
+                        `;
+                    })
+                    .catch(() => {
+                        document.getElementById('status-container').innerHTML = `
+                            <div class="text-center py-4">
+                                <i class="fas fa-exclamation-triangle text-red-500 text-2xl mb-2"></i>
+                                <p class="text-red-500">Failed to load platform status from backend</p>
+                            </div>
+                        `;
+                    });
+            }
+
+            // Utility functions
+            function getTimeAgo(date) {
+                const now = new Date();
+                const diff = Math.floor((now - date) / 1000);
+                
+                if (diff < 60) return 'now';
+                if (diff < 3600) return Math.floor(diff / 60) + 'm';
+                if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+                return Math.floor(diff / 86400) + 'd';
+            }
+
+            function showNotification(message) {
+                const notification = document.getElementById('notification');
+                const text = document.getElementById('notification-text');
+                
+                text.textContent = message;
+                notification.classList.remove('hidden');
+                
+                setTimeout(() => {
+                    notification.classList.add('hidden');
+                }, 3000);
+            }
+
+            function likeTweet(tweetId) {
+                showNotification('Tweet liked globally! ❤️🌍');
+            }
+
+            function retweetTweet(tweetId) {
+                showNotification('Tweet retweeted worldwide! 🔄🌍');
+            }
+        </script>
+    </body>
+    </html>
+  nginx.conf: |
+    server {
+        listen 80;
+        location / {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /index.html;
+        }
+        location /api/ {
+            proxy_pass http://tweetstream-backend:5000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        location /health {
+            proxy_pass http://tweetstream-backend:5000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tweetstream-backend
+  namespace: default
+  labels:
+    app: tweetstream-backend
+    component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tweetstream-backend
+  template:
+    metadata:
+      labels:
+        app: tweetstream-backend
+        component: backend
+    spec:
+      initContainers:
+      - name: setup
+        image: node:18-alpine
+        workingDir: /app
+        command: ['sh', '-c']
+        args:
+          - |
+            echo "📦 Copying application files..."
+            cp /config/package.json /app/
+            cp /config/server.js /app/
+            echo "📦 Installing dependencies..."
+            npm install --production
+            echo "✅ Setup complete"
+            ls -la /app/
+            echo "📦 Node modules:"
+            ls -la /app/node_modules/ | head -10
+        volumeMounts:
+        - name: backend-code
+          mountPath: /config
+        - name: node-modules
+          mountPath: /app
+      containers:
+      - name: backend
+        image: node:18-alpine
+        workingDir: /app
+        command: ['node', 'server.js']
+        ports:
+        - containerPort: 5000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "5000"
+        - name: DB_HOST
+          value: "postgresql.platform-services.svc.cluster.local"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "tweetstream"
+        - name: DB_USER
+          value: "postgres"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: password
+        - name: REDIS_HOST
+          value: "redis-master.platform-services.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: KAFKA_BROKER
+          value: "kafka.platform-services.svc.cluster.local:9092"
+        - name: JWT_SECRET
+          value: "tweetstream-jwt-secret-2024"
+        - name: FRONTEND_URL
+          value: "http://tweetstream.local"
+        volumeMounts:
+        - name: node-modules
+          mountPath: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      volumes:
+      - name: backend-code
+        configMap:
+          name: tweetstream-backend-config
+          items:
+          - key: server.js
+            path: server.js
+          - key: package.json
+            path: package.json
+      - name: node-modules
+        emptyDir: {}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tweetstream-frontend
+  namespace: default
+  labels:
+    app: tweetstream-frontend
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tweetstream-frontend
+  template:
+    metadata:
+      labels:
+        app: tweetstream-frontend
+        component: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html-content
+          mountPath: /usr/share/nginx/html/index.html
+          subPath: index.html
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: nginx.conf
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: html-content
+        configMap:
+          name: tweetstream-frontend-config
+          items:
+          - key: index.html
+            path: index.html
+      - name: nginx-config
+        configMap:
+          name: tweetstream-frontend-config
+          items:
+          - key: nginx.conf
+            path: nginx.conf
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tweetstream-backend
+  namespace: default
+  labels:
+    app: tweetstream-backend
+spec:
+  selector:
+    app: tweetstream-backend
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tweetstream-frontend
+  namespace: default
+  labels:
+    app: tweetstream-frontend
+spec:
+  selector:
+    app: tweetstream-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP 

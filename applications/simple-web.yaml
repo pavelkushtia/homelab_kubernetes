@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-web
+  namespace: sample-apps
+  labels:
+    app: simple-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: simple-web
+  template:
+    metadata:
+      labels:
+        app: simple-web
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-web
+  namespace: sample-apps
+  labels:
+    app: simple-web
+spec:
+  selector:
+    app: simple-web
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    nodePort: 30900
+  type: NodePort 

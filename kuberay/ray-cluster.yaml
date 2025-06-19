@@ -1,0 +1,127 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: raycluster-autoscaler
+  namespace: kuberay
+spec:
+  rayVersion: '2.47.0'
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+      dashboard-port: '8266'
+      max-worker-port: '8600'
+      metrics-export-port: '8081'
+      min-worker-port: '8301'
+      num-cpus: '1'
+      num-gpus: '0'
+      port: '6380'
+      ray-client-server-port: '10002'
+    serviceType: ClusterIP
+    template:
+      spec:
+        containers:
+        - command: ["ray", "start", "--head", "--dashboard-host=0.0.0.0", "--port=6380", "--dashboard-port=8266", "--dashboard-agent-listen-port=52365", "--ray-client-server-port=10002", "--min-worker-port=8301", "--max-worker-port=8600", "--metrics-export-port=8081", "--block"]
+          image: rayproject/ray:2.47.0
+          name: ray-head
+          ports:
+          - containerPort: 6380
+            name: gcs-server
+            protocol: TCP
+          - containerPort: 8266
+            name: dashboard
+            protocol: TCP
+          - containerPort: 10002
+            name: client
+            protocol: TCP
+          - containerPort: 8001
+            name: ray-serve
+            protocol: TCP
+          - containerPort: 8081
+            name: metrics
+            protocol: TCP
+          livenessProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - wget -T 2 -q -O- http://localhost:52365/api/local_raylet_healthz | grep -E 'success|successs' && wget -T 10 -q -O- http://localhost:8266/api/gcs_healthz | grep -E 'success|successs'
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - wget -T 2 -q -O- http://localhost:52365/api/local_raylet_healthz | grep -E 'success|successs' && wget -T 10 -q -O- http://localhost:8266/api/gcs_healthz | grep -E 'success|successs'
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          resources:
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+  workerGroupSpecs:
+  - groupName: small-workers
+    maxReplicas: 5
+    minReplicas: 1
+    rayStartParams:
+      num-cpus: '1'
+      num-gpus: '0'
+      port: '6380'
+    replicas: 1
+    template:
+      spec:
+        containers:
+        - command: ["ray", "start", "--address=raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:6380", "--block"]
+          image: rayproject/ray:2.47.0
+          name: ray-worker
+          ports:
+          - containerPort: 8301
+            name: objstore-st
+            protocol: TCP
+          - containerPort: 8400
+            name: objstore-en
+            protocol: TCP
+          - containerPort: 8401
+            name: nodemgr-st
+            protocol: TCP
+          - containerPort: 8500
+            name: nodemgr-en
+            protocol: TCP
+          - containerPort: 8501
+            name: runtime-st
+            protocol: TCP
+          - containerPort: 8600
+            name: runtime-en
+            protocol: TCP
+          resources:
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+  enableInTreeAutoscaling: true
+  autoscalerOptions:
+    env:
+    - name: RAY_PORT
+      value: "6380"
+    - name: RAY_ADDRESS
+      value: "raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:6380"
+    - name: RAY_METRICS_EXPORT_PORT
+      value: "8081"
+    imagePullPolicy: Always
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    upscalingMode: Default 

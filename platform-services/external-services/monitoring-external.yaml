@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-external
+  namespace: platform-services
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack-prometheus
+    app.kubernetes.io/instance: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: monitoring-kube-prometheus-stack-prometheus
+  ports:
+  - name: http-web
+    port: 9090
+    targetPort: 9090
+    nodePort: 30090
+  type: NodePort
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-external
+  namespace: platform-services
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: monitoring
+  ports:
+  - name: http-web
+    port: 3000
+    targetPort: 3000
+    nodePort: 30300
+  type: NodePort 

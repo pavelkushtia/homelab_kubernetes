@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: helm-repository
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: chartmuseum-pv
+  labels:
+    app: chartmuseum
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /opt/chartmuseum-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - sanzad-ubuntu-21
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chartmuseum-pvc
+  namespace: helm-repository
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-storage
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chartmuseum
+  namespace: helm-repository
+  labels:
+    app: chartmuseum
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chartmuseum
+  template:
+    metadata:
+      labels:
+        app: chartmuseum
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: sanzad-ubuntu-21
+      containers:
+      - name: chartmuseum
+        image: chartmuseum/chartmuseum:v0.15.0
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: DISABLE_API
+          value: "false"
+        - name: ALLOW_OVERWRITE
+          value: "true"
+        - name: STORAGE
+          value: "local"
+        - name: STORAGE_LOCAL_ROOTDIR
+          value: "/var/lib/chartmuseum"
+        - name: DEBUG
+          value: "true"
+        volumeMounts:
+        - name: chartmuseum-storage
+          mountPath: /var/lib/chartmuseum
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: chartmuseum-storage
+        persistentVolumeClaim:
+          claimName: chartmuseum-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chartmuseum-external
+  namespace: helm-repository
+  labels:
+    app: chartmuseum
+spec:
+  selector:
+    app: chartmuseum
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30800
+    protocol: TCP
+  type: NodePort 
