@@ -4,11 +4,11 @@
 # Prometheus configuration
 prometheus:
   prometheusSpec:
-    # Node affinity to match current setup
+    # Distribute across worker nodes (avoid master for data workloads)
     nodeSelector:
-      kubernetes.io/hostname: sanzad-ubuntu-21
+      node-role: worker
       
-    # Resource limits to match current setup
+    # Resource limits optimized for worker nodes
     resources:
       limits:
         cpu: 500m
@@ -37,14 +37,14 @@ prometheus:
 
 # Grafana configuration
 grafana:
-  # Node affinity
+  # Distribute across worker nodes (avoid master for data workloads)
   nodeSelector:
-    kubernetes.io/hostname: sanzad-ubuntu-21
+    node-role: worker
     
   # Disable sign up to match current setup
   grafana.ini:
     server:
-      root_url: "http://sanzad-ubuntu-21:30300"
+      root_url: "http://gpu-node:30300"
     
     auth.anonymous:
       enabled: false
@@ -52,7 +52,7 @@ grafana:
     security:
       admin_user: "admin"
       
-  # Resource limits to match current setup
+  # Resource limits optimized for worker nodes
   resources:
     limits:
       cpu: 200m

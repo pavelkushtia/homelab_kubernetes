@@ -164,11 +164,11 @@ print_status "✅ Platform Services Deployment Complete!"
 
 echo
 print_status "🌐 Service Access Information:"
-echo "   PostgreSQL: sanzad-ubuntu-21:30432 (postgres/<your-password>)"
-echo "   Redis: sanzad-ubuntu-21:30379"
-echo "   Kafka: sanzad-ubuntu-21:30092"
-echo "   Prometheus: http://sanzad-ubuntu-21:30090"
-echo "   Grafana: http://sanzad-ubuntu-21:30300 (admin/<your-password>)"
+echo "   PostgreSQL: gpu-node:30432 (postgres/<your-password>)"
+echo "   Redis: gpu-node:30379"
+echo "   Kafka: gpu-node:30092"
+echo "   Prometheus: http://gpu-node:30090"
+echo "   Grafana: http://gpu-node:30300 (admin/<your-password>)"
 
 echo
 print_status "📝 Next Steps:"

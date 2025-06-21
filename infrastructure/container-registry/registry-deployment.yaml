@@ -25,10 +25,10 @@ spec:
     required:
       nodeSelectorTerms:
       - matchExpressions:
-        - key: kubernetes.io/hostname
+        - key: node-role
           operator: In
           values:
-          - sanzad-ubuntu-21  # Control plane node
+          - worker  # Distribute across worker nodes
 
 ---
 apiVersion: v1
@@ -63,7 +63,7 @@ spec:
         app: docker-registry
     spec:
       nodeSelector:
-        kubernetes.io/hostname: sanzad-ubuntu-21  # Run on control plane
+        node-role: worker  # Distribute across worker nodes
       containers:
       - name: registry
         image: registry:2.8.2
@@ -151,5 +151,5 @@ metadata:
 data:
   daemon.json: |
     {
-      "insecure-registries": ["sanzad-ubuntu-21:30500", "sanzad-ubuntu-22:30500", "worker-node1:30500", "localhost:30500"]
+      "insecure-registries": ["gpu-node:30500", "worker-node1:30500", "worker-node2:30500", "worker-node3:30500", "worker-node4:30500", "localhost:30500"]
     } 

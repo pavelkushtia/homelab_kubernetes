@@ -11,11 +11,11 @@ master:
   persistence:
     enabled: false  # Using emptyDir like current setup
     
-  # Node affinity to match current setup
+  # Distribute across worker nodes (avoid master for data workloads)
   nodeSelector:
-    kubernetes.io/hostname: sanzad-ubuntu-21
+    node-role: worker
     
-  # Resource limits to match current setup  
+  # Resource limits optimized for worker nodes
   resources:
     limits:
       cpu: 500m

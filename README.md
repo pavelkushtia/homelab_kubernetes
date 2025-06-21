@@ -24,18 +24,18 @@ This repository serves as a **complete Kubernetes ecosystem** containing everyth
 - **Reduction**: 90% less configuration to maintain
 
 **Platform Access:**
-- PostgreSQL: `sanzad-ubuntu-21:30432` (postgres/<configured-password>)
-- Redis: `sanzad-ubuntu-21:30379`
-- Kafka: `sanzad-ubuntu-21:30092`  
-- Prometheus: `http://sanzad-ubuntu-21:30090`
-- Grafana: `http://sanzad-ubuntu-21:30300` (admin/<configured-password>)
+- PostgreSQL: `gpu-node:30432` (postgres/<configured-password>)
+- Redis: `gpu-node:30379`
+- Kafka: `gpu-node:30092`  
+- Prometheus: `http://gpu-node:30090`
+- Grafana: `http://gpu-node:30300` (admin/<configured-password>)
 
 #### 📦 **Container Registry & GitOps** (`infrastructure/`)
 Production-ready development platform with automated CI/CD:
 
-- ✅ **Local Container Registry** - `sanzad-ubuntu-21:30500`
-- ✅ **ArgoCD GitOps** - `http://sanzad-ubuntu-21:30080`
-- ✅ **ChartMuseum Helm Repository** - `http://sanzad-ubuntu-21:30800`
+- ✅ **Local Container Registry** - `gpu-node:30500`
+- ✅ **ArgoCD GitOps** - `http://gpu-node:30080`
+- ✅ **ChartMuseum Helm Repository** - `http://gpu-node:30800`
 - ✅ **Library Charts** - Reusable microservice patterns
 - ✅ **Sample Applications** - Reference implementations
 
@@ -62,7 +62,7 @@ Complete TypeScript social media platform demonstrating enterprise cloud-native 
 - ✅ **Enterprise Database Integration** - PostgreSQL with full schema, indexes, and 42+ sample tweets
 - ✅ **Modern Frontend** - React 18 + TypeScript with responsive Tailwind CSS design
 - ✅ **Real-time Features** - Socket.IO + Kafka for live updates and notifications
-- ✅ **Production Deployment** - Active on `http://sanzad-ubuntu-21:30951` (frontend) and `:30950` (backend)
+- ✅ **Production Deployment** - Active on `http://gpu-node:30951` (frontend) and `:30950` (backend)
 - ✅ **Platform Services Integration** - PostgreSQL, Redis, Kafka all connected and operational
 
 **Technical Implementation:**
@@ -74,8 +74,8 @@ Complete TypeScript social media platform demonstrating enterprise cloud-native 
 - **Performance**: Database indexes, pagination, optimized queries
 
 **Live Application Access:**
-- **Frontend**: `http://sanzad-ubuntu-21:30951` - Modern React interface
-- **Backend API**: `http://sanzad-ubuntu-21:30950` - REST API with health checks
+- **Frontend**: `http://gpu-node:30951` - Modern React interface
+- **Backend API**: `http://gpu-node:30950` - REST API with health checks
 - **Database**: PostgreSQL with complete social media schema and sample data
 
 ---
@@ -199,8 +199,8 @@ cd platform-services/
 ./deploy-platform-services.sh
 
 # Access services
-curl http://sanzad-ubuntu-21:30090  # Prometheus
-curl http://sanzad-ubuntu-21:30300  # Grafana
+curl http://gpu-node:30090  # Prometheus
+curl http://gpu-node:30300  # Grafana
 ```
 
 ### **📦 Deploy Container Registry & GitOps**
@@ -211,9 +211,9 @@ cd infrastructure/
 ./setup-infrastructure.sh
 
 # Access platforms
-# ArgoCD: http://sanzad-ubuntu-21:30080
-# Registry: http://sanzad-ubuntu-21:30500
-# ChartMuseum: http://sanzad-ubuntu-21:30800
+# ArgoCD: http://gpu-node:30080
+# Registry: http://gpu-node:30500
+# ChartMuseum: http://gpu-node:30800
 ```
 
 ### **🔧 Deploy Production Kubernetes Cluster**
@@ -431,3 +431,60 @@ This repository serves as a **reference implementation** for:
 **🚀 Ready to deploy enterprise-grade Kubernetes infrastructure with 90% less operational complexity!**
 
 *Start with the modernized [platform services](platform-services/) for shared infrastructure, then add applications using the [development platform](infrastructure/).*
+
+## 🚀 Quick Access
+
+### **Platform Services** (Distributed across cluster)
+- PostgreSQL: `gpu-node:30432` (postgres/<configured-password>)
+- Redis: `gpu-node:30379`
+- Kafka: `gpu-node:30092`
+- Prometheus: `http://gpu-node:30090`
+- Grafana: `http://gpu-node:30300` (admin/<configured-password>)
+
+### **Development Infrastructure** (Distributed across cluster)
+- ✅ **Local Container Registry** - `gpu-node:30500`
+- ✅ **ArgoCD GitOps** - `http://gpu-node:30080`
+- ✅ **ChartMuseum Helm Repository** - `http://gpu-node:30800`
+
+### **Applications** (Distributed across cluster)
+- ✅ **Production Deployment** - Active on `http://gpu-node:30951` (frontend) and `:30950` (backend)
+- ✅ **Sample Microservice** - Helm-based deployment with platform integration
+- ✅ **KubeRay Cluster** - Distributed computing across all worker nodes
+
+### **TweetStream Application** (Distributed across cluster)
+- **Frontend**: `http://gpu-node:30951` - Modern React interface
+- **Backend API**: `http://gpu-node:30950` - REST API with health checks
+
+## 🛠️ Quick Commands
+
+```bash
+# Check cluster status
+kubectl get nodes -o wide
+
+# Check platform services
+kubectl get pods -n platform-services
+
+# Check applications
+kubectl get pods -n applications
+
+# Access services
+curl http://gpu-node:30090  # Prometheus
+curl http://gpu-node:30300  # Grafana
+
+# Deploy infrastructure
+cd infrastructure
+./deploy-infrastructure.sh
+
+# Deploy platform services
+cd platform-services
+./deploy-platform-services.sh
+
+# Deploy applications
+cd applications
+kubectl apply -f simple-web.yaml
+
+# Access development tools
+# ArgoCD: http://gpu-node:30080
+# Registry: http://gpu-node:30500
+# ChartMuseum: http://gpu-node:30800
+```

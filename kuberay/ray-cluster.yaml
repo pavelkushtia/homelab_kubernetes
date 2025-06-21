@@ -19,6 +19,9 @@ spec:
     serviceType: ClusterIP
     template:
       spec:
+        # Head node on worker nodes (avoid master for data workloads)
+        nodeSelector:
+          node-role: worker
         containers:
         - command: ["ray", "start", "--head", "--dashboard-host=0.0.0.0", "--port=6380", "--dashboard-port=8266", "--dashboard-agent-listen-port=52365", "--ray-client-server-port=10002", "--min-worker-port=8301", "--max-worker-port=8600", "--metrics-export-port=8081", "--block"]
           image: rayproject/ray:2.47.0
@@ -77,6 +80,9 @@ spec:
     replicas: 1
     template:
       spec:
+        # Worker nodes distributed across all workers
+        nodeSelector:
+          node-role: worker
         containers:
         - command: ["ray", "start", "--address=raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:6380", "--block"]
           image: rayproject/ray:2.47.0

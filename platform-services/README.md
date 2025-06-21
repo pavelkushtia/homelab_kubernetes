@@ -53,13 +53,13 @@ platform-services/
 ## 🔗 Service Access
 
 ### External URLs (NodePort)
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| PostgreSQL | `sanzad-ubuntu-21:30432` | postgres/<configured-password> |
-| Redis | `sanzad-ubuntu-21:30379` | (no auth) |
-| Kafka | `sanzad-ubuntu-21:30092` | (plaintext) |
-| Prometheus | `http://sanzad-ubuntu-21:30090` | (no auth) |
-| Grafana | `http://sanzad-ubuntu-21:30300` | admin/<configured-password> |
+| Service | Connection | Credentials |
+|---------|------------|-------------|
+| PostgreSQL | `gpu-node:30432` | postgres/<configured-password> |
+| Redis | `gpu-node:30379` | (no auth) |
+| Kafka | `gpu-node:30092` | (plaintext) |
+| Prometheus | `http://gpu-node:30090` | (no auth) |
+| Grafana | `http://gpu-node:30300` | admin/<configured-password> |
 
 ### Internal URLs (for applications)
 | Service | Internal URL |
@@ -69,6 +69,24 @@ platform-services/
 | Kafka | `kafka.platform-services.svc.cluster.local:9092` |
 | Prometheus | `monitoring-kube-prometheus-prometheus.platform-services.svc.cluster.local:9090` |
 | Grafana | `monitoring-grafana.platform-services.svc.cluster.local:80` |
+
+## 🏗️ Cluster Distribution Strategy
+
+### **Intelligent Workload Distribution**
+Our platform services are now distributed across the 5-node cluster for optimal performance:
+
+| Service | Node Selection | Reasoning |
+|---------|---------------|-----------|
+| **PostgreSQL** | Worker nodes only | Data workloads avoid master node |
+| **Redis** | Worker nodes only | Memory-intensive, distributed across workers |
+| **Kafka** | Worker nodes only | High I/O, benefits from worker distribution |
+| **Prometheus** | Worker nodes only | Monitoring data storage on workers |
+| **Grafana** | Worker nodes only | Web UI distributed for better access |
+
+### **Resource Optimization**
+- **Master Node (gpu-node)**: Reserved for control plane and GPU workloads
+- **Worker Nodes**: Handle all data services and applications
+- **Load Balancing**: Services automatically distribute across available workers
 
 ## 🛠️ Management Commands
 

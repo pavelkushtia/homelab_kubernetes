@@ -167,8 +167,6 @@
       shell: |
         swapoff -a
         sed -i '/ swap / s/^/#/' /etc/fstab
-      args:
-        warn: false
 
     - name: Load kernel modules
       modprobe:
@@ -243,13 +241,24 @@
       ignore_errors: yes
 
     - name: Install containerd (if not present or force_reset)
-      apt:
-        name: "containerd.io={{ containerd_version }}"
-        state: present
-        update_cache: yes
-      retries: 3
-      delay: 5
-      when: containerd_check.rc != 0 or force_reset is defined
+      block:
+        - name: Try installing containerd.io (legacy)
+          apt:
+            name: "containerd.io={{ containerd_version }}"
+            state: present
+            update_cache: yes
+          register: containerd_io_result
+          ignore_errors: yes
+          retries: 3
+          delay: 5
+          when: containerd_check.rc != 0 or force_reset is defined
+
+        - name: Fallback to containerd (Ubuntu 24.04+)
+          apt:
+            name: "containerd"
+            state: present
+            update_cache: yes
+          when: (containerd_check.rc != 0 or force_reset is defined) and (containerd_io_result is failed or containerd_io_result is skipped)
 
     - name: Create containerd config directory
       file:
@@ -349,6 +358,9 @@
           - "kubectl={{ k8s_version }}*"
         state: present
         update_cache: yes
+        force: yes
+        allow_downgrade: yes
+        install_recommends: no
       retries: 3
       delay: 5
       when: k8s_check.rc != 0 or force_reset is defined
@@ -443,22 +455,19 @@
         mode: '0644'
 
     - name: Create kubeconfig for regular user
-      become_user: "{{ ansible_user }}"
       block:
         - name: Create .kube directory
           file:
             path: "/home/{{ ansible_user }}/.kube"
             state: directory
             mode: '0755'
-
-        - name: Copy admin.conf to user's kubeconfig
-          copy:
-            src: /etc/kubernetes/admin.conf
-            dest: "/home/{{ ansible_user }}/.kube/config"
-            remote_src: yes
             owner: "{{ ansible_user }}"
             group: "{{ ansible_user }}"
-            mode: '0644'
+
+        - name: Copy admin.conf to user's kubeconfig using sudo
+          shell: cp /etc/kubernetes/admin.conf /home/{{ ansible_user }}/.kube/config && chown {{ ansible_user }}:{{ ansible_user }} /home/{{ ansible_user }}/.kube/config
+          args:
+            creates: "/home/{{ ansible_user }}/.kube/config"
 
     - name: Generate join command
       shell: kubeadm token create --print-join-command

@@ -4,14 +4,16 @@ echo "🚀 Deploying Clean Kubernetes Cluster"
 echo "====================================="
 echo
 echo "Cluster Configuration:"
-echo "- Master: sanzad-ubuntu-21 (192.168.1.93) - 4 CPU, 9GB RAM"
-echo "- Worker: sanzad-ubuntu-22 (192.168.1.104) - 2 CPU, 5GB RAM" 
-echo "- Worker: worker-node1 (192.168.1.95) - 2 CPU, 6.6GB RAM"
+echo "- Master: gpu-node (192.168.1.79)"
+echo "- Worker: worker-node1 (192.168.1.95)"
+echo "- Worker: worker-node2 (192.168.1.132)"
+echo "- Worker: worker-node3 (192.168.1.105)"
+echo "- Worker: worker-node4 (192.168.1.137)"
 echo
 
 # Run the working playbook
 echo "🔧 Running Kubernetes installation playbook..."
-ansible-playbook -i inventory.ini working_k8s_install.yaml --become --ask-become-pass -e force_reset=true
+ansible-playbook -i inventory.ini working_k8s_install.yaml --become --ask-pass --ask-become-pass -e force_reset=true
 
 if [ $? -eq 0 ]; then
     echo

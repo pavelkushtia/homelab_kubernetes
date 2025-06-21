@@ -17,15 +17,15 @@ All applications can leverage our **enterprise-grade platform services**:
 - **Monitoring**: Prometheus + Grafana with custom dashboards
 
 ### **Development Platform (infrastructure/)**
-- **Container Registry**: `sanzad-ubuntu-21:30500`
-- **ArgoCD GitOps**: `http://sanzad-ubuntu-21:30080`
-- **Helm Repository**: `http://sanzad-ubuntu-21:30800`
+- **Container Registry**: `gpu-node:30500`
+- **ArgoCD GitOps**: `http://gpu-node:30080`
+- **Helm Repository**: `http://gpu-node:30800`
 
 ## 📦 Sample Applications
 
 ### 1. Simple Web Application (`simple-web.yaml`)
 - **Purpose**: Basic NGINX web server demonstration
-- **Access**: `http://sanzad-ubuntu-21:30900`
+- **Access**: `http://gpu-node:30900`
 - **Features**: Static content serving, basic Kubernetes patterns
 
 ### 2. Sample Microservice (`sample-microservice/`)
@@ -54,11 +54,11 @@ env:
 ### Using Container Registry
 ```bash
 # Build and push
-docker build -t sanzad-ubuntu-21:30500/myapp:v1.0.0 .
-docker push sanzad-ubuntu-21:30500/myapp:v1.0.0
+docker build -t gpu-node:30500/myapp:v1.0.0 .
+docker push gpu-node:30500/myapp:v1.0.0
 
 # Use in Kubernetes
-image: sanzad-ubuntu-21:30500/myapp:v1.0.0
+image: gpu-node:30500/myapp:v1.0.0
 ```
 
 ### Using ArgoCD GitOps
@@ -82,6 +82,24 @@ spec:
       selfHeal: true
 ```
 
+## 🏗️ Cluster Distribution Strategy
+
+### **Application Deployment Strategy**
+Applications are distributed across the 5-node cluster for optimal performance:
+
+| Application Type | Node Selection | Reasoning |
+|------------------|----------------|-----------|
+| **Web Applications** | Worker nodes | Better resource availability |
+| **API Services** | Worker nodes | Distributed load handling |
+| **Data Processing** | Worker nodes | CPU-intensive workloads |
+| **GPU Applications** | Master node (gpu-node) | GPU access required |
+| **Monitoring/UI** | Worker nodes | Distributed access |
+
+### **Resource Allocation**
+- **Master Node (gpu-node)**: Control plane + GPU workloads
+- **Worker Nodes**: All application workloads distributed automatically
+- **Load Balancing**: Kubernetes scheduler optimizes placement
+
 ## 🛠️ Development Workflow
 
 ### 1. Ensure Platform Services Running
@@ -101,9 +119,9 @@ helm install my-app . --namespace my-app --create-namespace
 ```
 
 ### 3. Access Applications
-- **Simple Web**: `http://sanzad-ubuntu-21:30900`
-- **Monitoring**: `http://sanzad-ubuntu-21:30300` (Grafana)
-- **ArgoCD**: `http://sanzad-ubuntu-21:30080`
+- **Simple Web**: `http://gpu-node:30900`
+- **Monitoring**: `http://gpu-node:30300` (Grafana)
+- **ArgoCD**: `http://gpu-node:30080`
 
 ## 📊 Monitoring Integration
 
@@ -121,7 +139,7 @@ Applications automatically benefit from our **90% simplified monitoring stack**:
 - Connect to `*.platform-services.svc.cluster.local` internal URLs
 
 ### ✅ Use Container Registry
-- Build and push to local registry: `sanzad-ubuntu-21:30500`
+- Build and push to local registry: `gpu-node:30500`
 - Faster pulls, no external dependencies
 
 ### ✅ Use GitOps

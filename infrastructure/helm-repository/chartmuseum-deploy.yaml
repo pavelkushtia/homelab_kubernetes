@@ -1,7 +1,9 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: helm-repository
+  name: chartmuseum
+  labels:
+    name: chartmuseum
 
 ---
 apiVersion: v1
@@ -23,17 +25,17 @@ spec:
     required:
       nodeSelectorTerms:
       - matchExpressions:
-        - key: kubernetes.io/hostname
+        - key: node-role
           operator: In
           values:
-          - sanzad-ubuntu-21
+          - worker
 
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: chartmuseum-pvc
-  namespace: helm-repository
+  namespace: chartmuseum
 spec:
   accessModes:
     - ReadWriteOnce
@@ -47,7 +49,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: chartmuseum
-  namespace: helm-repository
+  namespace: chartmuseum
   labels:
     app: chartmuseum
 spec:
@@ -61,43 +63,46 @@ spec:
         app: chartmuseum
     spec:
       nodeSelector:
-        kubernetes.io/hostname: sanzad-ubuntu-21
+        node-role: worker
       containers:
       - name: chartmuseum
         image: chartmuseum/chartmuseum:v0.15.0
         ports:
         - containerPort: 8080
           name: http
+          protocol: TCP
         env:
         - name: DISABLE_API
           value: "false"
         - name: ALLOW_OVERWRITE
           value: "true"
         - name: STORAGE
-          value: "local"
+          value: local
         - name: STORAGE_LOCAL_ROOTDIR
-          value: "/var/lib/chartmuseum"
-        - name: DEBUG
-          value: "true"
+          value: /charts
+        - name: CHART_POST_FORM_FIELD_NAME
+          value: chart
+        - name: PROV_POST_FORM_FIELD_NAME
+          value: prov
         volumeMounts:
         - name: chartmuseum-storage
-          mountPath: /var/lib/chartmuseum
+          mountPath: /charts
         livenessProbe:
           httpGet:
             path: /health
             port: 8080
           initialDelaySeconds: 30
-          periodSeconds: 10
+          timeoutSeconds: 5
         readinessProbe:
           httpGet:
             path: /health
             port: 8080
           initialDelaySeconds: 5
-          periodSeconds: 5
+          timeoutSeconds: 3
         resources:
           limits:
-            cpu: 200m
-            memory: 256Mi
+            cpu: 500m
+            memory: 512Mi
           requests:
             cpu: 100m
             memory: 128Mi
@@ -110,8 +115,26 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  name: chartmuseum
+  namespace: chartmuseum
+  labels:
+    app: chartmuseum
+spec:
+  selector:
+    app: chartmuseum
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: chartmuseum-external
-  namespace: helm-repository
+  namespace: chartmuseum
   labels:
     app: chartmuseum
 spec:

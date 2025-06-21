@@ -4,15 +4,17 @@ Part of the **[Kubernetes Infrastructure Repository](../README.md)** ecosystem p
 
 ## 🎯 Overview
 
-This directory contains a **working, tested** Kubernetes cluster setup that creates the foundation 3-node cluster for our entire ecosystem, including the **modernized Helm-based platform services**.
+This directory contains a **working, tested** Kubernetes cluster setup that creates the foundation 5-node cluster for our entire ecosystem, including the **modernized Helm-based platform services**.
 
 ## 🏗️ Cluster Configuration
 
 | Node | Role | IP | Resources | Status |
 |------|------|----|-----------| --------|
-| **sanzad-ubuntu-21** | Master (Control Plane) | 192.168.1.93 | 4 CPU, 9GB RAM | ✅ Working |
-| **sanzad-ubuntu-22** | Worker | 192.168.1.104 | 2 CPU, 5GB RAM | ✅ Working |
+| **gpu-node** | Master (Control Plane) | 192.168.1.79 | GPU-enabled | ✅ Working |
 | **worker-node1** | Worker | 192.168.1.95 | 2 CPU, 6.6GB RAM | ✅ Working |
+| **worker-node2** | Worker | 192.168.1.132 | 2 CPU, 6.6GB RAM | ✅ Working |
+| **worker-node3** | Worker | 192.168.1.105 | 2 CPU, 6.6GB RAM | ✅ Working |
+| **worker-node4** | Worker | 192.168.1.137 | 2 CPU, 6.6GB RAM | ✅ Working |
 
 ## 🚀 Complete Infrastructure Deployment
 
@@ -46,9 +48,9 @@ After cluster deployment, you can run our entire ecosystem:
 - **90% configuration reduction** vs custom YAML
 
 ### **✅ Development Platform**
-- Local container registry (`sanzad-ubuntu-21:30500`)
-- ArgoCD GitOps platform (`http://sanzad-ubuntu-21:30080`)
-- ChartMuseum Helm repository (`http://sanzad-ubuntu-21:30800`)
+- Local container registry (`gpu-node:30500`)
+- ArgoCD GitOps platform (`http://gpu-node:30080`)
+- ChartMuseum Helm repository (`http://gpu-node:30800`)
 
 ### **✅ Sample Applications**
 - Reference microservice implementations
@@ -148,7 +150,7 @@ If deployment fails:
 When successful, you should see:
 - All nodes showing `Ready` status
 - All system pods `Running` 
-- API server accessible at https://192.168.1.93:6443
+- API server accessible at https://192.168.1.79:6443
 - kubectl commands working without sudo
 - **Ready for platform services deployment**
 
@@ -157,7 +159,7 @@ When successful, you should see:
 After cluster deployment:
 
 1. **Deploy Platform Services**: `cd ../platform-services && ./deploy-platform-services.sh`
-2. **Access Monitoring**: `http://sanzad-ubuntu-21:30300` (Grafana)
+2. **Access Monitoring**: `http://gpu-node:30300` (Grafana)
 3. **Deploy Applications**: `cd ../applications && kubectl apply -f simple-web.yaml`
 4. **Setup GitOps**: `cd ../infrastructure && ./setup-infrastructure.sh`
 

@@ -178,7 +178,7 @@ test_argocd() {
     
     # Test API endpoint
     sleep 10
-    curl -f http://sanzad-ubuntu-21:$ARGOCD_SERVER_PORT/api/version || print_warning "API endpoint test failed"
+    curl -f http://gpu-node:$ARGOCD_SERVER_PORT/api/version || print_warning "API endpoint test failed"
 }
 
 # Function to create sample application
@@ -201,7 +201,7 @@ spec:
     path: guestbook
   destination:
     server: https://kubernetes.default.svc
-    namespace: default
+    namespace: guestbook
   syncPolicy:
     automated:
       prune: true
@@ -211,28 +211,21 @@ spec:
 EOF
 }
 
-# Function to display usage information
-show_usage() {
-    print_status "ArgoCD Installation Complete!"
-    echo ""
-    echo "ArgoCD Information:"
-    echo "  - Web UI: http://sanzad-ubuntu-21:$ARGOCD_SERVER_PORT"
+# Function to display access information
+display_access_info() {
+    print_status "ArgoCD installation completed successfully!"
+    echo
+    echo "📋 Access Information:"
+    echo "======================"
+    echo "  - Web UI: http://gpu-node:$ARGOCD_SERVER_PORT"
     echo "  - Username: admin"
     echo "  - Password: $ADMIN_PASSWORD"
-    echo ""
-    echo "ArgoCD CLI Login:"
-    echo "  argocd login sanzad-ubuntu-21:$ARGOCD_SERVER_PORT --insecure"
-    echo ""
-    echo "Useful Commands:"
-    echo "  # List applications"
-    echo "  argocd app list"
-    echo ""
-    echo "  # Sync an application"
-    echo "  argocd app sync <app-name>"
-    echo ""
-    echo "  # Create an application"
-    echo "  argocd app create <app-name> --repo <repo-url> --path <path> --dest-server https://kubernetes.default.svc --dest-namespace <namespace>"
-    echo ""
+    echo
+    echo "🔧 CLI Access:"
+    echo "  argocd login gpu-node:$ARGOCD_SERVER_PORT --insecure"
+    echo "  argocd account get-user-info"
+    echo
+    echo "📚 Documentation: https://argo-cd.readthedocs.io/"
 }
 
 # Main execution
@@ -261,9 +254,7 @@ main() {
     install_argocd_cli
     test_argocd
     create_sample_app
-    show_usage
-    
-    print_status "🎉 ArgoCD installation completed successfully!"
+    display_access_info
 }
 
 # Script execution

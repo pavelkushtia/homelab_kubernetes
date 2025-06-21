@@ -28,11 +28,12 @@ graph TB
             KO[KubeRay Operator Pod]
         end
         
-        subgraph "Ray Cluster"
-            HN[Head Node]
+        subgraph "Ray Cluster (Distributed)"
+            HN[Head Node - Worker]
             WN1[Worker Node 1]
             WN2[Worker Node 2]
             WN3[Worker Node 3]
+            WN4[Worker Node 4]
             AS[Autoscaler]
         end
         
@@ -40,50 +41,27 @@ graph TB
         HN --> WN1
         HN --> WN2
         HN --> WN3
+        HN --> WN4
         AS --> HN
     end
     
     User[User/Application] --> HN
 ```
 
-### Configuration Flow
-```mermaid
-graph LR
-    subgraph "Configuration Files"
-        Y1[kuberay-operator.yaml]
-        Y2[ray-cluster.yaml]
-    end
-    
-    subgraph "Kubernetes Resources"
-        R1[Operator Deployment]
-        R2[Head Node Pod]
-        R3[Worker Pods]
-        R4[Services]
-    end
-    
-    Y1 --> R1
-    Y2 --> R2
-    Y2 --> R3
-    R2 --> R4
-```
+### Cluster Distribution Strategy
+Our KubeRay cluster is intelligently distributed across the 5-node Kubernetes cluster:
 
-### Component Interaction
-```mermaid
-sequenceDiagram
-    participant User
-    participant Operator as KubeRay Operator
-    participant Head as Head Node
-    participant Workers as Worker Nodes
-    
-    User->>Operator: Apply YAML Configs
-    Operator->>Head: Create Head Node
-    Operator->>Workers: Create Worker Nodes
-    Head->>Workers: Manage Workers
-    User->>Head: Submit Jobs
-    Head->>Workers: Distribute Tasks
-    Workers->>Head: Return Results
-    Head->>User: Combine Results
-```
+| Component | Node Selection | Reasoning |
+|-----------|---------------|-----------|
+| **Ray Head Node** | Worker nodes only | Avoids master node for data workloads |
+| **Ray Worker Nodes** | All worker nodes | Distributed computing across cluster |
+| **Autoscaler** | Worker nodes | Monitors and scales worker pods |
+| **Dashboard** | Worker nodes | Web UI accessible from any worker |
+
+### Resource Optimization
+- **Master Node (gpu-node)**: Reserved for control plane and GPU workloads
+- **Worker Nodes**: Handle all Ray computing workloads
+- **Auto-scaling**: Automatically scales workers based on demand
 
 ## ⚙️ Configuration
 

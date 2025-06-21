@@ -15,11 +15,11 @@ primary:
     size: 20Gi
     storageClass: "local-storage"
     
-  # Node affinity to match current setup
+  # Distribute across worker nodes (avoid master for data workloads)
   nodeSelector:
-    kubernetes.io/hostname: sanzad-ubuntu-21
+    node-role: worker
     
-  # Resource limits to match current setup
+  # Resource limits optimized for worker nodes
   resources:
     limits:
       cpu: 1000m
@@ -34,7 +34,7 @@ service:
   ports:
     postgresql: 5432
 
-# External access via NodePort (matches current setup)
+# External access via NodePort (distributed across cluster)
 # We'll create a separate NodePort service for external access
 metrics:
   enabled: true
