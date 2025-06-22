@@ -58,10 +58,10 @@ spec:
     required:
       nodeSelectorTerms:
       - matchExpressions:
-        - key: kubernetes.io/hostname
+        - key: node-role
           operator: In
           values:
-          - sanzad-ubuntu-21
+          - worker
 
 ---
 apiVersion: v1
@@ -96,7 +96,7 @@ spec:
         app: chartmuseum
     spec:
       nodeSelector:
-        kubernetes.io/hostname: sanzad-ubuntu-21
+        node-role: worker
       containers:
       - name: chartmuseum
         image: chartmuseum/chartmuseum:$CHARTMUSEUM_VERSION
@@ -183,10 +183,8 @@ EOF
 # Function to create storage directory
 create_storage() {
     print_status "Creating ChartMuseum storage directory..."
-    ssh sanzad-ubuntu-21 "
-        sudo mkdir -p /opt/chartmuseum-data
-        sudo chmod 755 /opt/chartmuseum-data
-    "
+    sudo mkdir -p /opt/chartmuseum-data
+    sudo chmod 755 /opt/chartmuseum-data
 }
 
 # Function to install Helm if not present
@@ -213,7 +211,7 @@ configure_helm_repo() {
     sleep 10
     
     # Add the repository
-    helm repo add local http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT --force-update
+    helm repo add local http://gpu-node:$CHARTMUSEUM_PORT --force-update
     helm repo update
     
     print_status "✅ ChartMuseum repository added to Helm"
@@ -224,10 +222,10 @@ test_chartmuseum() {
     print_status "Testing ChartMuseum..."
     
     # Check if ChartMuseum is responding
-    curl -f http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/health || print_warning "ChartMuseum health check failed"
+    curl -f http://gpu-node:$CHARTMUSEUM_PORT/health || print_warning "ChartMuseum health check failed"
     
     # List charts (should be empty initially)
-    curl -f http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/api/charts || print_warning "ChartMuseum API test failed"
+    curl -f http://gpu-node:$CHARTMUSEUM_PORT/api/charts || print_warning "ChartMuseum API test failed"
     
     kubectl get pods -n $CHARTMUSEUM_NAMESPACE
     kubectl get services -n $CHARTMUSEUM_NAMESPACE
@@ -248,7 +246,7 @@ create_sample_chart() {
     helm package sample-app
     
     # Upload to ChartMuseum using curl
-    curl --data-binary "@sample-app-0.1.0.tgz" http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/api/charts
+    curl --data-binary "@sample-app-0.1.0.tgz" http://gpu-node:$CHARTMUSEUM_PORT/api/charts
     
     # Update Helm repo
     helm repo update
@@ -268,13 +266,13 @@ show_usage() {
     print_status "ChartMuseum Setup Complete!"
     echo ""
     echo "ChartMuseum Information:"
-    echo "  - Web UI: http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT"
-    echo "  - API: http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/api/charts"
-    echo "  - Health: http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/health"
+    echo "  - Web UI: http://gpu-node:$CHARTMUSEUM_PORT"
+    echo "  - API: http://gpu-node:$CHARTMUSEUM_PORT/api/charts"
+    echo "  - Health: http://gpu-node:$CHARTMUSEUM_PORT/health"
     echo ""
     echo "Helm Repository:"
     echo "  - Name: local"
-    echo "  - URL: http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT"
+    echo "  - URL: http://gpu-node:$CHARTMUSEUM_PORT"
     echo ""
     echo "Usage Examples:"
     echo "  # Search for charts"
@@ -284,11 +282,11 @@ show_usage() {
     echo "  helm install my-app local/chart-name"
     echo ""
     echo "  # Upload a chart"
-    echo "  curl --data-binary \"@chart-name-version.tgz\" http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/api/charts"
+    echo "  curl --data-binary \"@chart-name-version.tgz\" http://gpu-node:$CHARTMUSEUM_PORT/api/charts"
     echo ""
     echo "  # Package and upload"
     echo "  helm package my-chart/"
-    echo "  curl --data-binary \"@my-chart-version.tgz\" http://sanzad-ubuntu-21:$CHARTMUSEUM_PORT/api/charts"
+    echo "  curl --data-binary \"@my-chart-version.tgz\" http://gpu-node:$CHARTMUSEUM_PORT/api/charts"
     echo "  helm repo update"
     echo ""
 }

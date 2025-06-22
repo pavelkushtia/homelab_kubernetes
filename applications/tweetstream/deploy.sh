@@ -121,9 +121,9 @@ print_status "✅ TweetStream deployment completed successfully!"
 
 echo
 print_status "🌐 Application Access Information:"
-echo "   Frontend: http://sanzad-ubuntu-21:30951"
-echo "   Backend API: http://sanzad-ubuntu-21:30950"
-echo "   Health Check: curl http://sanzad-ubuntu-21:30950/health"
+echo "   Frontend: http://gpu-node:30951"
+echo "   Backend API: http://gpu-node:30950"
+echo "   Health Check: curl http://gpu-node:30950/health"
 
 echo
 print_status "👥 Sample Users (password: 'password123'):"
@@ -134,7 +134,7 @@ echo "   • tech_guru - Full-stack Developer"
 echo
 print_status "📝 Next Steps:"
 echo "   1. Access the frontend to start using TweetStream"
-echo "   2. Check API health: curl http://sanzad-ubuntu-21:30950/health"
+echo "   2. Check API health: curl http://gpu-node:30950/health"
 echo "   3. Monitor application: kubectl get pods"
 
 echo

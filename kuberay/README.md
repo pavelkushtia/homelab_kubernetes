@@ -5,7 +5,7 @@ Part of the **[Kubernetes Infrastructure Repository](../README.md)** ecosystem.
 ## 📋 Table of Contents
 1. [Overview](#overview)
 2. [Architecture](#architecture)
-3. [Configuration](#configuration)
+3. [Deployment Options](#deployment-options)
 4. [Quick Start](#quick-start)
 5. [Usage Examples](#usage-examples)
 6. [Monitoring & Debugging](#monitoring--debugging)
@@ -63,9 +63,34 @@ Our KubeRay cluster is intelligently distributed across the 5-node Kubernetes cl
 - **Worker Nodes**: Handle all Ray computing workloads
 - **Auto-scaling**: Automatically scales workers based on demand
 
+## 🚀 Deployment Options
+
+### **Option 1: Direct YAML Deployment (Current)**
+```bash
+# Deploy operator
+kubectl apply -f kuberay-operator.yaml
+
+# Deploy Ray cluster
+kubectl apply -f ray-cluster.yaml
+```
+
+### **Option 2: Official Helm Chart Deployment (Recommended)**
+```bash
+# Using official KubeRay Helm repository
+helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+helm install kuberay-operator kuberay/kuberay-operator --namespace kuberay --create-namespace
+helm install ray-cluster kuberay/ray-cluster --namespace kuberay
+```
+
+### **Option 3: Automated Deployment Script**
+```bash
+# Use our deployment script (uses official charts)
+./deploy-kuberay.sh
+```
+
 ## ⚙️ Configuration
 
-### Port Management
+### **Port Management**
 
 Ray requires specific ports for different components. Here's how we manage them, avoiding conflicts with existing services:
 
@@ -147,7 +172,7 @@ workerGroupSpecs:
             protocol: TCP
 ```
 
-### Network Policy
+### **Network Policy**
 
 Updated NetworkPolicy to reflect new port assignments:
 
@@ -179,10 +204,6 @@ spec:
       port: 8001  # Ray Serve
     - protocol: TCP
       port: 8081  # Metrics
-    - protocol: TCP
-      portRange:
-        min: 8301
-        max: 8600  # Worker port ranges
   egress:
   - to:
     - podSelector:
@@ -199,412 +220,330 @@ spec:
       port: 8001
     - protocol: TCP
       port: 8081
-    - protocol: TCP
-      portRange:
-        min: 8301
-        max: 8600
-```
-
-### Port Usage Explanation
-
-1. **Head Node Ports** (Changed to avoid conflicts):
-   - `6380`: GCS server (was 6379, conflicted with Redis)
-   - `10002`: Client server (was 10001)
-   - `8266`: Dashboard (was 8265)
-   - `8001`: Ray Serve (was 8000)
-   - `8081`: Metrics (was 8080, conflicted with ChartMuseum)
-
-2. **Worker Node Ports** (Moved to higher ranges):
-   - `8301-8400`: Object Store ports
-   - `8401-8500`: Node Manager ports
-   - `8501-8600`: Runtime Environment ports
-
-3. **Port Management Best Practices**:
-   - Each port has a specific name for clarity
-   - Port ranges are documented
-   - NetworkPolicy ensures secure communication
-   - Ports are properly exposed in services
-   - Port assignments avoid conflicts with existing services
-
-### Port Conflict Resolution
-
-We've resolved the following conflicts:
-1. Redis (6379) → Ray GCS (6380)
-2. ChartMuseum (8080) → Ray Metrics (8081)
-3. Various services (8000) → Ray Serve (8001)
-4. Moved worker port ranges to higher numbers (8301-8600)
-
-### KubeRay Operator Configuration (`kuberay-operator.yaml`)
-
-```yaml
-apiVersion: ray.io/v1alpha1
-kind: RayCluster
-metadata:
-  name: raycluster-autoscaler
-spec:
-  rayVersion: '2.9.0'
-  headGroupSpec:
-    serviceType: ClusterIP
-    template:
-      spec:
-        containers:
-        - name: ray-head
-          image: rayproject/ray:2.9.0
-          ports:
-          - containerPort: 6380  # Changed from 6379 to avoid Redis conflict
-          - containerPort: 10002 # Changed from 10001 to avoid potential conflicts
-          - containerPort: 8266  # Changed from 8265 to avoid potential conflicts
-          resources:
-            limits:
-              cpu: "1"
-              memory: "1Gi"
-            requests:
-              cpu: "500m"
-              memory: "512Mi"
-```
-
-#### Operator Configuration Explained:
-
-1. **Basic Setup**:
-   - `apiVersion: ray.io/v1alpha1`: Uses Ray's custom resource definition
-   - `kind: RayCluster`: Defines this as a Ray cluster resource
-   - `name: raycluster-autoscaler`: Unique identifier for this cluster
-
-2. **Head Node Configuration**:
-   - `rayVersion: '2.9.0'`: Specific Ray version to use
-   - `serviceType: ClusterIP`: Makes head node accessible within cluster
-   - `ports`: Three essential ports:
-     - `6380`: Ray's internal communication
-     - `10002`: Client connections
-     - `8266`: Web dashboard
-
-3. **Resource Management**:
-   ```yaml
-   resources:
-     limits:
-       cpu: "1"        # Maximum CPU allowed
-       memory: "1Gi"   # Maximum memory allowed
-     requests:
-       cpu: "500m"     # Minimum CPU guaranteed
-       memory: "512Mi" # Minimum memory guaranteed
-   ```
-
-### Ray Cluster Configuration (`ray-cluster.yaml`)
-
-```yaml
-  workerGroupSpecs:
-  - groupName: small-group
-    replicas: 1
-    minReplicas: 1
-    maxReplicas: 5
-    template:
-      spec:
-        containers:
-        - name: ray-worker
-          image: rayproject/ray:2.9.0
-          resources:
-            limits:
-              cpu: "1"
-              memory: "1Gi"
-            requests:
-              cpu: "500m"
-              memory: "512Mi"
-```
-
-#### Worker Configuration Explained:
-
-1. **Worker Group Settings**:
-   - `groupName: small-group`: Identifier for this worker group
-   - `replicas: 1`: Initial number of workers
-   - `minReplicas: 1`: Minimum workers to maintain
-   - `maxReplicas: 5`: Maximum workers allowed
-
-2. **Autoscaling Behavior**:
-   ```mermaid
-   graph LR
-       subgraph "Workload Changes"
-           W1[Low Load] --> W2[High Load]
-           W2 --> W3[Low Load]
-       end
-       
-       subgraph "Cluster Response"
-           N1[1 Worker] --> N2[5 Workers]
-           N2 --> N3[1 Worker]
-       end
-       
-       W1 --> N1
-       W2 --> N2
-       W3 --> N3
-   ```
-
-3. **Resource Configuration**:
-   - Each worker gets:
-     - 1 CPU core maximum
-     - 1Gi memory maximum
-     - 500m CPU guaranteed
-     - 512Mi memory guaranteed
-
-### Configuration Flow Diagram
-
-```mermaid
-graph TD
-    subgraph "YAML Configuration"
-        Y1[kuberay-operator.yaml]
-        Y2[ray-cluster.yaml]
-    end
-    
-    subgraph "Kubernetes Resources"
-        R1[Operator Deployment]
-        R2[Head Node Pod]
-        R3[Worker Pods]
-    end
-    
-    subgraph "Ray Components"
-        C1[Ray Dashboard]
-        C2[Ray Client]
-        C3[Ray Workers]
-    end
-    
-    Y1 --> R1
-    Y2 --> R2
-    Y2 --> R3
-    R2 --> C1
-    R2 --> C2
-    R3 --> C3
 ```
 
 ## 🚀 Quick Start
 
-1. **Deploy KubeRay Operator**:
-   ```bash
-   # This creates the operator that will manage Ray clusters
-   kubectl apply -f kuberay-operator.yaml
-   
-   # Verify the operator is running
-   kubectl get pods -n kuberay
-   ```
+### **Prerequisites**
+- Kubernetes cluster with at least 2 nodes
+- kubectl configured
+- Helm (optional, for Helm deployment)
 
-2. **Deploy Ray Cluster**:
-   ```bash
-   # This creates your Ray cluster with autoscaling
-   kubectl apply -f ray-cluster.yaml
-   
-   # Check the status of your Ray cluster
-   kubectl get rayclusters -n kuberay
-   ```
+### **Step 1: Deploy KubeRay Operator**
+```bash
+# Method 1: Direct YAML
+kubectl apply -f kuberay-operator.yaml
 
-3. **Access the Dashboard**:
-   ```bash
-   # This makes the Ray dashboard available on your local machine
-   kubectl port-forward -n kuberay svc/raycluster-autoscaler-head-svc 8265:8265
-   ```
-   Then open: http://localhost:8265
-
-## 🎮 Usage Examples
-
-### Basic Ray Job
-```python
-# Python code to submit a job to Ray
-import ray
-ray.init(address="ray://raycluster-autoscaler-head-svc:10001")
-
-@ray.remote
-def process_data(data):
-    return data * 2
-
-# Submit job to Ray cluster
-result = ray.get(process_data.remote(42))
-print(result)  # Output: 84
+# Method 2: Helm (recommended)
+helm repo add local http://gpu-node:30800
+helm install kuberay-operator local/kuberay --namespace kuberay --create-namespace
 ```
 
-### Data Processing Pipeline
+### **Step 2: Wait for Operator**
+```bash
+kubectl wait --for=condition=available --timeout=300s deployment/kuberay-operator -n kuberay
+```
+
+### **Step 3: Deploy Ray Cluster**
+```bash
+# Method 1: Direct YAML
+kubectl apply -f ray-cluster.yaml
+
+# Method 2: Helm (recommended)
+helm install ray-cluster local/kuberay \
+  --namespace kuberay \
+  --set rayCluster.enabled=true
+```
+
+### **Step 4: Verify Deployment**
+```bash
+# Check operator
+kubectl get pods -n kuberay
+
+# Check Ray cluster
+kubectl get rayclusters -n kuberay
+
+# Check Ray pods
+kubectl get pods -n kuberay -l ray.io/cluster=raycluster-autoscaler
+```
+
+## 📊 Usage Examples
+
+### **Example 1: Basic Ray Job**
 ```python
-# Example of distributed data processing
+import ray
+import time
+
+# Connect to Ray cluster
+ray.init(address="ray://raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:10002")
+
+@ray.remote
+def hello_world():
+    return "Hello from Ray!"
+
+# Submit job
+result = ray.get(hello_world.remote())
+print(result)
+```
+
+### **Example 2: Distributed Computing**
+```python
+import ray
+import numpy as np
+
+ray.init(address="ray://raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:10002")
+
+@ray.remote
+def compute_chunk(data_chunk):
+    return np.sum(data_chunk)
+
+# Distribute computation
+data = np.random.rand(1000, 1000)
+chunks = np.array_split(data, 4)
+futures = [compute_chunk.remote(chunk) for chunk in chunks]
+results = ray.get(futures)
+total = sum(results)
+print(f"Total sum: {total}")
+```
+
+### **Example 3: Machine Learning with Ray**
+```python
 import ray
 from ray import train
-from ray.train import ScalingConfig
 from ray.train.torch import TorchTrainer
+import torch
 
-# Initialize Ray
-ray.init(address="ray://raycluster-autoscaler-head-svc:10001")
+ray.init(address="ray://raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:10002")
 
-# Define training function
 def train_func():
     # Your training code here
-    pass
+    model = torch.nn.Linear(10, 1)
+    optimizer = torch.optim.Adam(model.parameters())
+    
+    for epoch in range(10):
+        # Training loop
+        pass
+    
+    return model.state_dict()
 
-# Create trainer
+# Distributed training
 trainer = TorchTrainer(
-    train_func,
-    scaling_config=ScalingConfig(
-        num_workers=3,
-        use_gpu=False
-    )
+    train_loop_per_worker=train_func,
+    scaling_config={"num_workers": 2}
 )
-
-# Start training
 result = trainer.fit()
 ```
 
-## 🔄 How It All Works Together
+## 🔍 Monitoring & Debugging
 
-1. **Initialization**:
-   - KubeRay Operator creates the Ray head node
-   - Head node starts with configured resources
-   - Initial worker nodes are created
+### **Dashboard Access**
+```bash
+# Port forward to access dashboard
+kubectl port-forward -n kuberay svc/raycluster-autoscaler-head-svc 8266:8266
 
-2. **Job Submission**:
-   - Application connects to Ray head node
-   - Head node distributes work to workers
-   - Workers process tasks and return results
-
-3. **Autoscaling**:
-   - Operator monitors resource usage
-   - Scales workers up when needed
-   - Scales workers down when idle
-
-4. **Failure Handling**:
-   - Operator detects node failures
-   - Automatically replaces failed nodes
-   - Maintains cluster health
-
-## 📈 Monitoring and Metrics
-
-The Ray dashboard provides real-time insights:
-
-```mermaid
-graph TB
-    subgraph "Ray Dashboard"
-        M1[Task Count]
-        M2[Execution Time]
-        M3[Resource Usage]
-        M4[Worker Status]
-    end
-    
-    M1 --> D[Dashboard]
-    M2 --> D
-    M3 --> D
-    M4 --> D
+# Access dashboard at http://localhost:8266
 ```
 
-Key metrics in our sample app:
-- `sample_app_tasks_completed`: How many tasks finished
-- `sample_app_task_latency`: How long tasks took
+### **Logs**
+```bash
+# Operator logs
+kubectl logs -n kuberay deployment/kuberay-operator
 
-## 🔍 Monitoring and Debugging
+# Head node logs
+kubectl logs -n kuberay -l ray.io/cluster=raycluster-autoscaler,ray.io/component=head
 
+# Worker logs
+kubectl logs -n kuberay -l ray.io/cluster=raycluster-autoscaler,ray.io/component=worker
+```
+
+### **Metrics**
+```bash
+# Ray metrics endpoint
+kubectl port-forward -n kuberay svc/raycluster-autoscaler-head-svc 8081:8081
+
+# Access metrics at http://localhost:8081
+```
+
+## 🛠️ Troubleshooting
+
+### **Common Issues**
+
+#### **1. CRD Not Found**
+```bash
+# Error: no matches for kind "RayCluster" in version "ray.io/v1"
+# Solution: Wait for operator to install CRDs
+kubectl wait --for=condition=available --timeout=300s deployment/kuberay-operator -n kuberay
+```
+
+#### **2. Port Conflicts**
+```bash
+# Check for port conflicts
+kubectl get svc --all-namespaces | grep -E "(6379|10001|8265|8000|8080)"
+
+# Solution: Use our updated port configuration
+```
+
+#### **3. Node Selector Issues**
+```bash
+# Check node labels
+kubectl get nodes --show-labels
+
+# Ensure worker nodes have correct labels
+kubectl label nodes worker-node1 worker-node2 worker-node3 worker-node4 node-role=worker
+```
+
+#### **4. Resource Constraints**
+```bash
+# Check pod events
+kubectl describe pod -n kuberay <pod-name>
+
+# Check node resources
+kubectl top nodes
+```
+
+### **Debugging Commands**
 ```bash
 # Check Ray cluster status
-kubectl get rayclusters
+kubectl get rayclusters -n kuberay -o yaml
 
-# View Ray dashboard
-kubectl port-forward svc/raycluster-autoscaler-head-svc 8265:8265
+# Check Ray services
+kubectl get svc -n kuberay
 
-# Check worker logs
-kubectl logs -l ray.io/node-type=worker
+# Check Ray pods and their distribution
+kubectl get pods -n kuberay -o wide
+
+# Check Ray logs
+kubectl logs -n kuberay -l ray.io/cluster=raycluster-autoscaler
 ```
 
-## 🔧 Troubleshooting
+## 🎯 Best Practices
 
-Common issues and solutions:
+### **1. Resource Management**
+- **CPU**: Allocate based on workload requirements
+- **Memory**: Monitor memory usage, especially for ML workloads
+- **GPU**: Use GPU nodes for GPU-intensive workloads
+- **Storage**: Use persistent volumes for data that needs to survive pod restarts
 
-1. **Cluster Not Starting**:
-   ```bash
-   # Check operator logs
-   kubectl logs -n kuberay -l app=kuberay-operator
-   
-   # Check head node logs
-   kubectl logs -n kuberay -l ray.io/node-type=head
-   ```
+### **2. Scaling Strategy**
+- **Min Replicas**: Set based on minimum required capacity
+- **Max Replicas**: Set based on cluster capacity and cost constraints
+- **Auto-scaling**: Enable for dynamic workloads
+- **Graceful Shutdown**: Ensure proper cleanup of resources
 
-2. **Workers Not Scaling**:
-   ```bash
-   # Check autoscaler logs
-   kubectl logs -n kuberay -l ray.io/node-type=head | grep autoscaler
-   ```
+### **3. Network Configuration**
+- **Port Management**: Avoid conflicts with other services
+- **Network Policies**: Restrict traffic to necessary ports
+- **Service Discovery**: Use Kubernetes DNS for service communication
 
-3. **Application Errors**:
-   ```bash
-   # Check worker logs
-   kubectl logs -n kuberay -l ray.io/node-type=worker
-   ```
+### **4. Monitoring**
+- **Metrics Collection**: Enable Ray metrics export
+- **Logging**: Centralize logs for debugging
+- **Dashboard**: Use Ray dashboard for cluster monitoring
+- **Alerts**: Set up alerts for resource usage and errors
 
-4. **Worker Scaling Issues**:
-   ```bash
-   # Check worker status
-   kubectl get pods -l ray.io/node-type=worker
-   
-   # Check operator logs
-   kubectl logs -l app.kubernetes.io/name=kuberay-operator
-   ```
+### **5. Security**
+- **RBAC**: Use proper service accounts and roles
+- **Network Policies**: Restrict pod-to-pod communication
+- **Secrets**: Use Kubernetes secrets for sensitive data
+- **Image Security**: Use trusted base images
 
-5. **Connection Issues**:
-   ```bash
-   # Verify head node service
-   kubectl get svc raycluster-autoscaler-head-svc
-   
-   # Check network policies
-   kubectl get networkpolicies
-   ```
+## 🔮 Future Considerations
 
-6. **Resource Issues**:
-   ```bash
-   # Check resource usage
-   kubectl top pods -l ray.io/node-type=head
-   kubectl top pods -l ray.io/node-type=worker
-   ```
+### **1. Advanced Features**
+- **Ray Serve**: Deploy ML models as services
+- **Ray Tune**: Hyperparameter tuning
+- **Ray RLlib**: Reinforcement learning
+- **Ray Datasets**: Large-scale data processing
 
-## 📈 Best Practices
+### **2. Integration**
+- **Platform Services**: Integrate with PostgreSQL, Redis, Kafka
+- **Monitoring**: Integrate with Prometheus and Grafana
+- **CI/CD**: Automate deployment with ArgoCD
+- **Storage**: Use distributed storage for large datasets
 
-1. **Resource Planning**:
-   - Set appropriate resource limits
-   - Monitor usage patterns
-   - Adjust based on workload
+### **3. Scaling**
+- **Multi-cluster**: Deploy across multiple Kubernetes clusters
+- **Cloud Integration**: Use cloud-specific optimizations
+- **Edge Computing**: Deploy to edge nodes
+- **Hybrid Cloud**: Mix on-premises and cloud resources
 
-2. **Autoscaling Configuration**:
-   - Start with conservative limits
-   - Monitor scaling behavior
-   - Adjust based on performance
+## 📚 Learning Resources
 
-3. **Application Design**:
-   - Design for distributed execution
-   - Handle failures gracefully
-   - Use Ray's built-in features
+### **Official Documentation**
+- [KubeRay Documentation](https://docs.ray.io/en/latest/ray-core/kubernetes/index.html)
+- [Ray Documentation](https://docs.ray.io/)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
 
-## 🚀 Future Considerations
+### **Tutorials**
+- [Ray Quick Start](https://docs.ray.io/en/latest/ray-core/walkthrough.html)
+- [KubeRay Examples](https://github.com/ray-project/kuberay/tree/master/ray-operator/config/samples)
+- [Ray ML Tutorials](https://docs.ray.io/en/latest/ray-more.html)
 
-1. **GPU Support**:
-   - Configure GPU resources
-   - Optimize for ML workloads
-   - Monitor GPU utilization
+### **Community**
+- [Ray Slack](https://ray-distributed.slack.com/)
+- [KubeRay GitHub](https://github.com/ray-project/kuberay)
+- [Ray GitHub](https://github.com/ray-project/ray)
 
-2. **Multi-Cluster Setup**:
-   - Deploy across regions
-   - Handle cross-cluster communication
-   - Manage resource distribution
+## 🎯 Integration with Our Platform
 
-3. **Advanced Features**:
-   - Custom resource definitions
-   - Advanced autoscaling policies
-   - Integration with other services
+### **Platform Services Integration**
+```python
+import ray
+import redis
+import psycopg2
+from kafka import KafkaProducer
 
-## 🎓 Learning Resources
+# Connect to Ray
+ray.init(address="ray://raycluster-autoscaler-head-svc.kuberay.svc.cluster.local:10002")
 
-1. **Official Documentation**:
-   - [KubeRay Documentation](https://docs.ray.io/en/latest/cluster/kubernetes/index.html)
-   - [Ray Documentation](https://docs.ray.io/en/latest/)
+# Connect to platform services
+redis_client = redis.Redis(host='redis-master.platform-services.svc.cluster.local', port=6379)
+pg_conn = psycopg2.connect(host='postgresql.platform-services.svc.cluster.local', port=5432, database='shared_db')
+kafka_producer = KafkaProducer(bootstrap_servers=['kafka.platform-services.svc.cluster.local:9092'])
 
-2. **Example Projects**:
-   - [Ray Examples](https://github.com/ray-project/ray/tree/master/python/ray/examples)
-   - [KubeRay Examples](https://github.com/ray-project/kuberay/tree/master/ray-operator/config/samples)
+@ray.remote
+def process_data_with_platform_services(data):
+    # Use Redis for caching
+    cache_key = f"processed_{hash(data)}"
+    cached_result = redis_client.get(cache_key)
+    
+    if cached_result:
+        return cached_result
+    
+    # Process data
+    result = complex_processing(data)
+    
+    # Store in PostgreSQL
+    with pg_conn.cursor() as cur:
+        cur.execute("INSERT INTO processed_data (data, result) VALUES (%s, %s)", (data, result))
+    pg_conn.commit()
+    
+    # Publish to Kafka
+    kafka_producer.send('processed-data', result.encode())
+    
+    # Cache in Redis
+    redis_client.setex(cache_key, 3600, result)
+    
+    return result
+```
 
-## 🔗 Related Components
+### **Monitoring Integration**
+```python
+# Ray metrics are automatically collected by Prometheus
+# Access via Grafana dashboard at http://gpu-node:30300
+```
 
-- **[Platform Services](../platform-services/README.md)** - Shared infrastructure
-- **[Infrastructure](../infrastructure/README.md)** - Container registry and GitOps platform
-- **[Main Repository](../README.md)** - Complete Kubernetes ecosystem overview
+### **Deployment Integration**
+```bash
+# Deploy via ArgoCD
+kubectl apply -f argocd/kuberay-application.yaml
+
+# Or deploy via Helm
+helm install kuberay local/kuberay --namespace kuberay --create-namespace
+```
 
 ---
-**Status**: ✅ **ACTIVE** - Ready for use with autoscaling capabilities 
 
-Remember: KubeRay is a powerful tool, but like any tool, it requires proper configuration and understanding to use effectively. Start small, monitor carefully, and scale up as needed! 🚀 
+**Status**: ✅ **READY** - Integrated with distributed cluster architecture  
+**Last Updated**: June 21, 2025  
+**Distribution**: Worker nodes only (avoids master node for data workloads) 

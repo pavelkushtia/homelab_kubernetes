@@ -5,8 +5,8 @@ This guide covers testing both the current working system and the new secure dep
 
 ## ✅ Current System Status
 
-**Frontend**: ✅ Running on http://sanzad-ubuntu-21:30951  
-**Backend**: ✅ Running on http://sanzad-ubuntu-21:30950  
+**Frontend**: ✅ Running on http://gpu-node:30951  
+**Backend**: ✅ Running on http://gpu-node:30950  
 **Database**: ✅ Connected and serving data  
 
 ## 🔍 Quick Health Checks
@@ -14,7 +14,7 @@ This guide covers testing both the current working system and the new secure dep
 ### 1. Backend API Test
 ```bash
 # Health check
-curl http://sanzad-ubuntu-21:30950/health
+curl http://gpu-node:30950/health
 
 # Expected response: JSON with "status":"healthy"
 ```
@@ -22,7 +22,7 @@ curl http://sanzad-ubuntu-21:30950/health
 ### 2. Frontend Test
 ```bash
 # Check frontend accessibility
-curl -I http://sanzad-ubuntu-21:30951
+curl -I http://gpu-node:30951
 
 # Expected: HTTP/1.1 200 OK
 ```
@@ -30,7 +30,7 @@ curl -I http://sanzad-ubuntu-21:30951
 ### 3. API Data Test
 ```bash
 # Test tweets endpoint
-curl http://sanzad-ubuntu-21:30950/api/tweets
+curl http://gpu-node:30950/api/tweets
 
 # Expected: JSON array with tweets data
 ```
@@ -72,7 +72,7 @@ kubectl wait --for=condition=ready pod -l app=tweetstream-production --timeout=3
 ### 3. Test New Secure Deployment
 ```bash
 # Test new production backend (port 30955)
-curl http://sanzad-ubuntu-21:30955/health
+curl http://gpu-node:30955/health
 
 # Expected: Healthy response from secure deployment
 ```
@@ -124,7 +124,7 @@ kubectl run debug-pg --image=postgres:15-alpine --rm -it --restart=Never -- \
 ```bash
 # Simple load test
 for i in {1..10}; do
-  curl -s http://sanzad-ubuntu-21:30950/health > /dev/null && echo "Request $i: OK"
+  curl -s http://gpu-node:30950/health > /dev/null && echo "Request $i: OK"
 done
 ```
 
@@ -138,12 +138,12 @@ time kubectl exec -n platform-services postgresql-0 -- \
 
 ## 🌐 Browser Testing
 
-1. **Frontend Access**: http://sanzad-ubuntu-21:30951
+1. **Frontend Access**: http://gpu-node:30951
    - Should show TweetStream interface
    - Login/Register should work
    - Timeline should display tweets
 
-2. **API Direct Access**: http://sanzad-ubuntu-21:30950
+2. **API Direct Access**: http://gpu-node:30950
    - `/health` - Health status
    - `/api/tweets` - All tweets
    - `/api/users` - User list
@@ -151,7 +151,7 @@ time kubectl exec -n platform-services postgresql-0 -- \
 ## 📝 Test Scenarios
 
 ### Scenario 1: New User Registration
-1. Access frontend: http://sanzad-ubuntu-21:30951
+1. Access frontend: http://gpu-node:30951
 2. Click "Register"
 3. Create new user account
 4. Verify login works

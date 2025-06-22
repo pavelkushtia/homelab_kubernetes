@@ -7,8 +7,8 @@ appVersion: "1.0.0"
 
 dependencies:
   - name: microservice
-    version: "1.0.0"
-    repository: "http://sanzad-ubuntu-21:30800"
+    version: 1.0.0
+    repository: "http://gpu-node:30800"
 
 maintainers:
   - name: Application Team

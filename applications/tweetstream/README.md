@@ -72,8 +72,8 @@ applications/tweetstream/
 
 | Service | Status | Endpoint | Technology |
 |---------|--------|----------|------------|
-| **Frontend** | 🟢 Running | `http://sanzad-ubuntu-21:30951` | React + TypeScript |
-| **Backend** | 🟢 Running | `http://sanzad-ubuntu-21:30950` | Node.js + Express |
+| **Frontend** | �� Running | `http://gpu-node:30951` | React + TypeScript |
+| **Backend** | 🟢 Running | `http://gpu-node:30950` | Node.js + Express |
 | **Database** | 🟢 Connected | PostgreSQL with full schema | 5 users, 42+ tweets |
 | **Platform Services** | 🟢 Operational | PostgreSQL, Redis, Kafka | All integrated |
 
@@ -81,13 +81,13 @@ applications/tweetstream/
 
 ```bash
 # Frontend Application
-open http://sanzad-ubuntu-21:30951
+open http://gpu-node:30951
 
 # Backend API Health Check
-curl http://sanzad-ubuntu-21:30950/health
+curl http://gpu-node:30950/health
 
 # Public Tweets API
-curl http://sanzad-ubuntu-21:30950/api/tweets/public
+curl http://gpu-node:30950/api/tweets/public
 ```
 
 ## 🗄️ Database Schema
@@ -337,7 +337,7 @@ Authorization: Bearer <jwt_token>
 
 ### Health Check Endpoint
 ```bash
-curl http://sanzad-ubuntu-21:30950/health
+curl http://gpu-node:30950/health
 ```
 
 Response:

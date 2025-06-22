@@ -8,7 +8,7 @@ echo "🚀 Setting up Container Registry for Kubernetes cluster..."
 # Configuration
 REGISTRY_NAMESPACE="container-registry"
 REGISTRY_PORT="30500"
-NODES=("sanzad-ubuntu-21" "sanzad-ubuntu-22" "worker-node1")
+NODES=("gpu-node" "sanzad-ubuntu-22" "worker-node1")
 # SUDO_PASS - Will prompt interactively for security
 
 # Colors for output
@@ -54,7 +54,7 @@ configure_docker_daemon() {
             sudo tee /etc/docker/daemon.json > /dev/null <<EOF
 {
   \"insecure-registries\": [
-    \"sanzad-ubuntu-21:30500\",
+    \"gpu-node:30500\",
     \"sanzad-ubuntu-22:30500\", 
     \"worker-node1:30500\",
     \"localhost:30500\",
@@ -105,7 +105,7 @@ test_registry() {
     for node in "${NODES[@]}"; do
         print_status "Testing registry access from $node..."
         ssh -o StrictHostKeyChecking=no "$node" "
-            curl -f http://localhost:30500/v2/ || curl -f http://sanzad-ubuntu-21:30500/v2/
+            curl -f http://localhost:30500/v2/ || curl -f http://gpu-node:30500/v2/
         " && print_status "✅ Registry accessible from $node" || print_warning "❌ Registry not accessible from $node"
     done
     
@@ -144,21 +144,21 @@ show_usage() {
     echo "Registry Information:"
     echo "  - Internal URL: docker-registry.container-registry.svc.cluster.local:5000"
     echo "  - External URL: <any-node>:30500"
-    echo "  - Web UI: http://sanzad-ubuntu-21:30500/v2/_catalog"
+    echo "  - Web UI: http://gpu-node:30500/v2/_catalog"
     echo ""
     echo "Usage Examples:"
     echo "  # Tag an image for the registry"
-    echo "  sudo docker tag myapp:latest sanzad-ubuntu-21:30500/myapp:v1.0.0"
+    echo "  sudo docker tag myapp:latest gpu-node:30500/myapp:v1.0.0"
     echo ""
     echo "  # Push an image"
-    echo "  sudo docker push sanzad-ubuntu-21:30500/myapp:v1.0.0"
+    echo "  sudo docker push gpu-node:30500/myapp:v1.0.0"
     echo ""
     echo "  # Pull an image"
-    echo "  sudo docker pull sanzad-ubuntu-21:30500/myapp:v1.0.0"
+    echo "  sudo docker pull gpu-node:30500/myapp:v1.0.0"
     echo ""
     echo "Kubernetes Deployment:"
     echo "  # Use in Pod spec"
-    echo "  image: sanzad-ubuntu-21:30500/myapp:v1.0.0"
+    echo "  image: gpu-node:30500/myapp:v1.0.0"
     echo ""
 }
 

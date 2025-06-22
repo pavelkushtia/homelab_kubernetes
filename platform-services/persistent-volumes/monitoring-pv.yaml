@@ -17,10 +17,10 @@ spec:
     required:
       nodeSelectorTerms:
       - matchExpressions:
-        - key: kubernetes.io/hostname
+        - key: node-role
           operator: In
           values:
-          - sanzad-ubuntu-21
+          - worker
 
 ---
 apiVersion: v1
@@ -42,7 +42,7 @@ spec:
     required:
       nodeSelectorTerms:
       - matchExpressions:
-        - key: kubernetes.io/hostname
+        - key: node-role
           operator: In
           values:
-          - sanzad-ubuntu-21 
+          - worker 

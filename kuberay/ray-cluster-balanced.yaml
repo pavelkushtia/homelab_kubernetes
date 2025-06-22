@@ -1,0 +1,54 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: ray-cluster-balanced
+  namespace: kuberay
+spec:
+  headGroupSpec:
+    serviceType: ClusterIP
+    rayStartParams:
+      dashboard-host: 0.0.0.0
+      num-cpus: "2"
+      memory: "3000000000"
+      node-ip-address: "ray-cluster-balanced-head-svc"
+    template:
+      spec:
+        nodeSelector:
+          node-role: worker
+        containers:
+        - name: ray-head
+          image: rayproject/ray:2.46.0
+          command: ["ray", "start", "--head", "--port=6379", "--dashboard-host=0.0.0.0", "--node-ip-address=ray-cluster-balanced-head-svc"]
+          ports:
+          - containerPort: 6379
+          - containerPort: 8265
+          resources:
+            limits:
+              cpu: 2
+              memory: 3G
+            requests:
+              cpu: 2
+              memory: 3G
+  workerGroupSpecs:
+  - groupName: cpu-workergroup
+    replicas: 4
+    rayStartParams:
+      num-cpus: "2"
+      memory: "3000000000"
+    template:
+      spec:
+        nodeSelector:
+          node-role: worker
+        containers:
+        - name: ray-worker
+          image: rayproject/ray:2.46.0
+          command: ["ray", "start", "--address=ray-cluster-balanced-head-svc:6379"]
+          ports:
+          - containerPort: 6379
+          resources:
+            limits:
+              cpu: 2
+              memory: 3G
+            requests:
+              cpu: 2
+              memory: 3G 

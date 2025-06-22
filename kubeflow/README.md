@@ -46,8 +46,8 @@ kubectl apply -k manifests/
 
 ML pipeline metrics are automatically collected by our **Prometheus monitoring stack**:
 
-- **Grafana Dashboard**: `http://sanzad-ubuntu-21:30300` (admin/<configured-password>)
-- **Prometheus**: `http://sanzad-ubuntu-21:30090`
+- **Grafana Dashboard**: `http://gpu-node:30300` (admin/<configured-password>)
+- **Prometheus**: `http://gpu-node:30090`
 - **Custom ML Metrics**: Model accuracy, training time, inference latency
 
 ## 🔗 Related Components

@@ -4,7 +4,7 @@
 # Backend Configuration
 backend:
   image:
-    repository: sanzad-ubuntu-21:30500/tweetstream-backend
+    repository: gpu-node:30500/tweetstream-backend
     tag: "latest"
     pullPolicy: Always
   
@@ -46,7 +46,7 @@ backend:
 # Frontend Configuration
 frontend:
   image:
-    repository: sanzad-ubuntu-21:30500/tweetstream-frontend
+    repository: gpu-node:30500/tweetstream-frontend
     tag: "latest"
     pullPolicy: Always
   

@@ -111,7 +111,7 @@ setup_library_charts() {
     
     # Upload to ChartMuseum
     print_status "Uploading library charts to repository..."
-    curl --data-binary "@microservice-1.0.0.tgz" http://sanzad-ubuntu-21:30800/api/charts
+    curl --data-binary "@microservice-1.0.0.tgz" http://gpu-node:30800/api/charts
     
     # Update Helm repo
     helm repo update
@@ -185,8 +185,8 @@ EOF
 
     # Build and push sample image
     cd /tmp/sample-app
-    echo "$SUDO_PASS" | sudo -S docker build -t sanzad-ubuntu-21:30500/sample/api:1.0.0 .
-    echo "$SUDO_PASS" | sudo -S docker push sanzad-ubuntu-21:30500/sample/api:1.0.0
+    echo "$SUDO_PASS" | sudo -S docker build -t gpu-node:30500/sample/api:1.0.0 .
+    echo "$SUDO_PASS" | sudo -S docker push gpu-node:30500/sample/api:1.0.0
     
     # Clean up
     rm -rf /tmp/sample-app
@@ -238,9 +238,9 @@ show_final_status() {
     echo "🎉 All components deployed successfully!"
     echo ""
     echo "📊 Access Information:"
-    echo "  • Container Registry: http://sanzad-ubuntu-21:30500"
-    echo "  • ArgoCD Web UI: http://sanzad-ubuntu-21:30080"
-    echo "  • Helm Repository: http://sanzad-ubuntu-21:30800"
+    echo "  • Container Registry: http://gpu-node:30500"
+    echo "  • ArgoCD Web UI: http://gpu-node:30080"
+    echo "  • Helm Repository: http://gpu-node:30800"
     echo ""
     echo "🔐 Credentials:"
     echo "  • ArgoCD Username: admin"
