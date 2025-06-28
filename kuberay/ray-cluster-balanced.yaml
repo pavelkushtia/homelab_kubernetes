@@ -10,18 +10,19 @@ spec:
       dashboard-host: 0.0.0.0
       num-cpus: "2"
       memory: "3000000000"
-      node-ip-address: "ray-cluster-balanced-head-svc"
     template:
       spec:
         nodeSelector:
-          node-role: worker
+          kubernetes.io/hostname: gpu-node
         containers:
         - name: ray-head
           image: rayproject/ray:2.46.0
-          command: ["ray", "start", "--head", "--port=6379", "--dashboard-host=0.0.0.0", "--node-ip-address=ray-cluster-balanced-head-svc"]
           ports:
           - containerPort: 6379
           - containerPort: 8265
+          env:
+          - name: RAY_ADDRESS
+            value: "ray-cluster-balanced-head-svc:6379"
           resources:
             limits:
               cpu: 2
@@ -38,13 +39,38 @@ spec:
     template:
       spec:
         nodeSelector:
-          node-role: worker
+          node-role.kubernetes.io/worker: ""
+        initContainers:
+        - name: wait-gcs-ready
+          image: rayproject/ray:2.46.0
+          command: ["/bin/bash", "-c", "--"]
+          args:
+          - |
+            SECONDS=0
+            while true; do
+              if (( SECONDS <= 120 )); then
+                if ray health-check --address ray-cluster-balanced-head-svc:6379 > /dev/null 2>&1; then
+                  echo "GCS is ready."
+                  break
+                fi
+                echo "$SECONDS seconds elapsed: Waiting for GCS to be ready."
+              else
+                echo "Timed out waiting for GCS to be ready."
+                exit 1
+              fi
+              sleep 1
+              ((SECONDS++))
+            done
         containers:
         - name: ray-worker
           image: rayproject/ray:2.46.0
-          command: ["ray", "start", "--address=ray-cluster-balanced-head-svc:6379"]
           ports:
           - containerPort: 6379
+          env:
+          - name: RAY_ADDRESS
+            value: "ray-cluster-balanced-head-svc:6379"
+          - name: FQ_RAY_IP
+            value: "ray-cluster-balanced-head-svc"
           resources:
             limits:
               cpu: 2
